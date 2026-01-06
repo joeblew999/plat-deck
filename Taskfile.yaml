@@ -26,10 +26,9 @@ tasks:
     cmds:
       - task --list
 
-  # ============ Build Targets ============
+  # ============ Build ============
 
-
-  build-clean-all:
+  build-clean:
     desc: Clean build artifacts
     cmds:
       - rm -rf {{.BUILD_DIR}}
@@ -138,7 +137,7 @@ tasks:
       - task: build-wasi
       - task: build-wazero-host
 
-  # ============ Development ============
+  # ============ Dev ============
 
   dev:
     desc: Run Cloudflare worker locally
@@ -157,8 +156,8 @@ tasks:
     cmds:
       - go test ./...
 
-  src-clone:
-    desc: Clone all decksh test repos
+  test-clone:
+    desc: Clone decksh test repos
     cmds:
       - mkdir -p {{.SOURCE_DIR}}
       - |
@@ -203,7 +202,7 @@ tasks:
 
   test-deckviz:
     desc: Test with real decksh files from deckviz repo
-    deps: [build-cli, src-clone]
+    deps: [build-cli, test-clone]
     cmds:
       - |
         echo "Testing decksh files from deckviz repo..."
@@ -236,7 +235,7 @@ tasks:
 
   test-decksh:
     desc: Test with decksh examples from decksh repo
-    deps: [build-cli, src-clone]
+    deps: [build-cli, test-clone]
     cmds:
       - |
         echo "Testing decksh files from decksh repo..."
@@ -276,7 +275,7 @@ tasks:
       - task: test-decksh
       - task: test-deckviz
 
-  # ============ Cloudflare Deployment ============
+  # ============ Cloudflare ============
 
   cf-setup:
     desc: Create Cloudflare resources (idempotent)
@@ -300,45 +299,55 @@ tasks:
     cmds:
       - bunx wrangler r2 bucket notification create {{.CF_R2_INPUT}} --event-type object-create --queue {{.CF_QUEUE}} 2>/dev/null || echo "Notification already exists or queue not ready"
 
-  deploy:
+  cf-teardown:
+    desc: Delete all Cloudflare resources (DESTRUCTIVE)
+    prompt: This will DELETE all Cloudflare resources. Are you sure?
+    cmds:
+      - bunx wrangler delete {{.CF_WORKER_NAME}} --force 2>/dev/null || echo "Worker {{.CF_WORKER_NAME}} not found"
+      - bunx wrangler r2 bucket delete {{.CF_R2_INPUT}} 2>/dev/null || echo "Bucket {{.CF_R2_INPUT}} not found or not empty"
+      - bunx wrangler r2 bucket delete {{.CF_R2_OUTPUT}} 2>/dev/null || echo "Bucket {{.CF_R2_OUTPUT}} not found or not empty"
+      - bunx wrangler r2 bucket delete {{.CF_R2_WASM}} 2>/dev/null || echo "Bucket {{.CF_R2_WASM}} not found or not empty"
+      - bunx wrangler queues delete {{.CF_QUEUE}} 2>/dev/null || echo "Queue {{.CF_QUEUE}} not found"
+      - bunx wrangler kv namespace delete --namespace-id $(bunx wrangler kv namespace list 2>/dev/null | grep -A1 {{.CF_KV_NAMESPACE}} | grep id | cut -d'"' -f4) 2>/dev/null || echo "KV namespace {{.CF_KV_NAMESPACE}} not found"
+      - echo "✓ Teardown complete"
+
+  cf-deploy:
     desc: Deploy to Cloudflare Workers
     deps: [build-cloudflare]
     cmds:
       - bunx wrangler deploy --config wrangler.toml
 
-  deploy-tinygo:
+  cf-deploy-tinygo:
     desc: Deploy to Cloudflare (TinyGo build)
     deps: [build-cloudflare-tinygo]
     cmds:
       - bunx wrangler deploy --config wrangler.toml
 
-  # ============ R2 WASM Storage ============
+  # ============ R2 ============
 
-  upload-wasm-browser:
+  r2-upload:
+    desc: Upload a .dsh file (task r2-upload FILE=deck.dsh)
+    cmds:
+      - bunx wrangler r2 object put {{.CF_R2_INPUT}}/{{.FILE | base}} --file={{.FILE}} --remote
+
+  r2-upload-wasm:
+    desc: Upload all WASM builds to R2
+    cmds:
+      - task: r2-upload-wasm-browser
+      - task: r2-upload-wasm-wasi
+
+  r2-upload-wasm-browser:
     desc: Upload browser WASM to R2
     deps: [build-browser]
     cmds:
       - bunx wrangler r2 object put {{.CF_R2_WASM}}/browser/deckfs.wasm --file {{.BUILD_DIR}}/browser/deckfs.wasm --remote
       - bunx wrangler r2 object put {{.CF_R2_WASM}}/browser/wasm_exec.js --file {{.BUILD_DIR}}/browser/wasm_exec.js --remote
 
-  upload-wasm-wasi:
+  r2-upload-wasm-wasi:
     desc: Upload WASI WASM to R2
     deps: [build-wasi]
     cmds:
       - bunx wrangler r2 object put {{.CF_R2_WASM}}/wasi/deckfs.wasm --file {{.BUILD_DIR}}/wasi/deckfs.wasm --remote
-
-  upload-wasm-all:
-    desc: Upload all WASM builds to R2
-    cmds:
-      - task: upload-wasm-browser
-      - task: upload-wasm-wasi
-
-  # ============ R2 Utilities ============
-
-  r2-upload:
-    desc: Upload a .dsh file (task r2-upload FILE=deck.dsh)
-    cmds:
-      - bunx wrangler r2 object put {{.CF_R2_INPUT}}/{{.FILE | base}} --file={{.FILE}} --remote
 
   r2-list:
     desc: List R2 buckets
@@ -372,5 +381,5 @@ tasks:
       - 'echo "✓ Setup complete!"'
       - 'echo "  1. Update wrangler.toml with KV namespace ID"'
       - 'echo "  2. Run: task cf-notifications"'
-      - 'echo "  3. Run: task deploy"'
-      - 'echo "  4. Run: task upload-wasm-all (for runtime loading)"'
+      - 'echo "  3. Run: task cf-deploy"'
+      - 'echo "  4. Run: task r2-upload-wasm (for runtime loading)"'
