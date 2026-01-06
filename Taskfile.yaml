@@ -126,12 +126,16 @@ tasks:
     desc: Run Cloudflare worker locally
     deps: [build-cloudflare]
     cmds:
+      - lsof -ti :8787 | xargs kill -9 2>/dev/null || true
+      - echo "Starting wrangler dev server at http://localhost:8787"
       - bunx wrangler dev --config wrangler.toml
 
   dev-wazero:
     desc: Run wazero host locally
     deps: [build-wasi, build-wazero-host]
     cmds:
+      - lsof -ti :8080 | xargs kill -9 2>/dev/null || true
+      - echo "Starting wazero host at http://localhost:8080"
       - ./{{.BUILD_DIR}}/wazero/deckfs-host -wasm-file {{.BUILD_DIR}}/wasi/deckfs.wasm -addr :8080
 
   test:

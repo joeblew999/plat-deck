@@ -99,6 +99,16 @@ type WazeroServer struct {
 }
 
 func (s *WazeroServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// For /process endpoint, run WASM
 	// For storage endpoints, use R2 HTTP API directly
 

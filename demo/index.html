@@ -212,12 +212,31 @@ edeck</textarea>
         </div>
 
         <div class="api-info">
-            <strong>API Endpoint:</strong> <code id="apiUrl">https://deckfs.gedw99.workers.dev/process</code>
+            <strong>API:</strong>
+            <select id="apiSelect" onchange="updateApiUrl()">
+                <option value="https://deckfs.gedw99.workers.dev">Production (Cloudflare)</option>
+                <option value="http://localhost:8787">Local Wrangler (:8787)</option>
+                <option value="http://localhost:8080">Local Wazero (:8080)</option>
+            </select>
+            <code id="apiUrl">https://deckfs.gedw99.workers.dev/process</code>
         </div>
     </div>
 
     <script>
-        const API_URL = 'https://deckfs.gedw99.workers.dev/process';
+        let API_BASE = 'https://deckfs.gedw99.workers.dev';
+        let API_URL = API_BASE + '/process';
+
+        function updateApiUrl() {
+            API_BASE = document.getElementById('apiSelect').value;
+            API_URL = API_BASE + '/process';
+            document.getElementById('apiUrl').textContent = API_URL;
+        }
+
+        // Auto-detect localhost
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            document.getElementById('apiSelect').value = 'http://localhost:8080';
+            updateApiUrl();
+        }
 
         const examples = {
             simple: `deck
