@@ -1,0 +1,30 @@
+# Build output
+.bin/
+# Source tests repos.
+.src/
+
+# Go
+go.sum
+
+# Node
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cloudflare
+.wrangler/
+.dev.vars
+
+# Environment (contains secrets)
+.env
+
+# Task
+.task/

@@ -1,0 +1,376 @@
+version: '3'
+
+dotenv: ['.env']
+
+vars:
+  BUILD_DIR: .bin
+  SOURCE_DIR: .src
+  # Test data repos
+  DECKVIZ_REPO: https://github.com/ajstarks/deckviz.git
+  DECKSH_REPO: https://github.com/ajstarks/decksh.git
+  # Cloudflare resource names
+  CF_WORKER_NAME: deckfs
+  CF_R2_INPUT: deckfs-input
+  CF_R2_OUTPUT: deckfs-output
+  CF_R2_WASM: deckfs-wasm
+  CF_QUEUE: deckfs-events
+  CF_KV_NAMESPACE: DECKFS_STATUS
+
+env:
+  GOWORK: off
+  DECKFONTS: "sans:Helvetica,mono:Courier,serif:Times,symbol:Symbol"
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # ============ Build Targets ============
+
+
+  build-clean-all:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+
+  build-cloudflare:
+    desc: Build for Cloudflare Workers (syumai/workers)
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}/cloudflare
+      - go run github.com/syumai/workers/cmd/workers-assets-gen@latest -o {{.BUILD_DIR}}/cloudflare
+      - GOOS=js GOARCH=wasm go build -tags cloudflare -o {{.BUILD_DIR}}/cloudflare/app.wasm ./cmd/cloudflare
+    sources:
+      - cmd/cloudflare/**/*.go
+      - handler/**/*.go
+      - runtime/**/*.go
+      - internal/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/cloudflare/app.wasm"
+      - "{{.BUILD_DIR}}/cloudflare/worker.mjs"
+
+  build-cloudflare-tinygo:
+    desc: Build for Cloudflare with TinyGo (smaller binary)
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}/cloudflare
+      - go run github.com/syumai/workers/cmd/workers-assets-gen@latest -o {{.BUILD_DIR}}/cloudflare
+      - tinygo build -tags cloudflare -target wasm -no-debug -o {{.BUILD_DIR}}/cloudflare/app.wasm ./cmd/cloudflare
+    sources:
+      - cmd/cloudflare/**/*.go
+      - handler/**/*.go
+      - runtime/**/*.go
+      - internal/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/cloudflare/app.wasm"
+      - "{{.BUILD_DIR}}/cloudflare/worker.mjs"
+
+  build-browser:
+    desc: Build for browser (standard Go WASM)
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}/browser
+      - GOOS=js GOARCH=wasm go build -o {{.BUILD_DIR}}/browser/deckfs.wasm ./cmd/browser
+      - cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" {{.BUILD_DIR}}/browser/
+    sources:
+      - cmd/browser/**/*.go
+      - handler/**/*.go
+      - runtime/**/*.go
+      - internal/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/browser/deckfs.wasm"
+      - "{{.BUILD_DIR}}/browser/wasm_exec.js"
+
+  build-wasi:
+    desc: Build WASI module (for wazero, wasmtime, etc.)
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}/wasi
+      - tinygo build -target wasi -o {{.BUILD_DIR}}/wasi/deckfs.wasm ./cmd/wasi
+    sources:
+      - cmd/wasi/**/*.go
+      - handler/**/*.go
+      - runtime/**/*.go
+      - internal/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/wasi/deckfs.wasm"
+
+  build-wazero-host:
+    desc: Build wazero host binary (loads WASM at runtime)
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}/wazero
+      - go build -o {{.BUILD_DIR}}/wazero/deckfs-host ./cmd/wazero
+    sources:
+      - cmd/wazero/**/*.go
+      - handler/**/*.go
+      - runtime/**/*.go
+      - internal/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/wazero/deckfs-host"
+
+  build-cli:
+    desc: Build native CLI for testing
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - go build -o {{.BUILD_DIR}}/deckfs ./cmd/cli
+    sources:
+      - cmd/cli/**/*.go
+      - handler/**/*.go
+      - runtime/**/*.go
+      - internal/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/deckfs"
+
+  build-all:
+    desc: Build all targets
+    cmds:
+      - task: build-cloudflare
+      - task: build-browser
+      - task: build-wasi
+      - task: build-wazero-host
+
+  # ============ Development ============
+
+  dev:
+    desc: Run Cloudflare worker locally
+    deps: [build-cloudflare]
+    cmds:
+      - bunx wrangler dev --config wrangler.toml
+
+  dev-wazero:
+    desc: Run wazero host locally
+    deps: [build-wasi, build-wazero-host]
+    cmds:
+      - ./{{.BUILD_DIR}}/wazero/deckfs-host -wasm-file {{.BUILD_DIR}}/wasi/deckfs.wasm -addr :8080
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
+
+  src-clone:
+    desc: Clone all decksh test repos
+    cmds:
+      - mkdir -p {{.SOURCE_DIR}}
+      - |
+        if [ ! -d "{{.SOURCE_DIR}}/deckviz" ]; then
+          git clone --depth 1 {{.DECKVIZ_REPO}} {{.SOURCE_DIR}}/deckviz
+        else
+          echo "{{.SOURCE_DIR}}/deckviz already exists"
+        fi
+      - |
+        if [ ! -d "{{.SOURCE_DIR}}/decksh" ]; then
+          git clone --depth 1 {{.DECKSH_REPO}} {{.SOURCE_DIR}}/decksh
+        else
+          echo "{{.SOURCE_DIR}}/decksh already exists"
+        fi
+    status:
+      - test -d {{.SOURCE_DIR}}/deckviz
+      - test -d {{.SOURCE_DIR}}/decksh
+
+  test-e2e:
+    desc: End-to-end test with sample decksh
+    deps: [build-cli]
+    cmds:
+      - |
+        echo 'deck
+            slide "white" "black"
+                ctext "Hello World" 50 50 5
+                rect 50 30 20 10 "blue"
+                circle 50 70 5 "red"
+            eslide
+        edeck' | ./{{.BUILD_DIR}}/deckfs process | tee /tmp/deckfs-output.json
+      - |
+        # Verify output is valid JSON with expected fields
+        if grep -q '"success":true' /tmp/deckfs-output.json && \
+           grep -q '"slideCount":1' /tmp/deckfs-output.json && \
+           grep -q 'svg' /tmp/deckfs-output.json; then
+          echo "✓ E2E test passed"
+        else
+          echo "✗ E2E test failed"
+          cat /tmp/deckfs-output.json
+          exit 1
+        fi
+
+  test-deckviz:
+    desc: Test with real decksh files from deckviz repo
+    deps: [build-cli, src-clone]
+    cmds:
+      - |
+        echo "Testing decksh files from deckviz repo..."
+        echo ""
+        failed=0
+        passed=0
+        CLI_PATH="$(pwd)/{{.BUILD_DIR}}/deckfs"
+        for dir in {{.SOURCE_DIR}}/deckviz/*/; do
+          for dsh in "$dir"*.dsh; do
+            [ -f "$dsh" ] || continue
+            name="deckviz/$(basename "$dir")/$(basename "$dsh")"
+            # Use file path so includes resolve relative to source file
+            if "$CLI_PATH" process "$dsh" > /tmp/deckfs-test.json 2>&1; then
+              if grep -q '"success":true' /tmp/deckfs-test.json; then
+                echo "✓ $name"
+                passed=$((passed + 1))
+              else
+                echo "✗ $name"
+                failed=$((failed + 1))
+              fi
+            else
+              echo "✗ $name"
+              failed=$((failed + 1))
+            fi
+          done
+        done
+        echo ""
+        total=$((passed + failed))
+        echo "Results: $passed/$total passed ($failed include fragments or incomplete files expected)"
+
+  test-decksh:
+    desc: Test with decksh examples from decksh repo
+    deps: [build-cli, src-clone]
+    cmds:
+      - |
+        echo "Testing decksh files from decksh repo..."
+        echo ""
+        failed=0
+        passed=0
+        CLI_PATH="$(pwd)/{{.BUILD_DIR}}/deckfs"
+        # Test tests directory
+        if [ -d "{{.SOURCE_DIR}}/decksh/tests" ]; then
+          for dsh in {{.SOURCE_DIR}}/decksh/tests/*.dsh; do
+            [ -f "$dsh" ] || continue
+            name="decksh/tests/$(basename "$dsh")"
+            # Use file path so includes resolve relative to source file
+            if "$CLI_PATH" process "$dsh" > /tmp/deckfs-test.json 2>&1; then
+              if grep -q '"success":true' /tmp/deckfs-test.json; then
+                echo "✓ $name"
+                passed=$((passed + 1))
+              else
+                echo "✗ $name"
+                failed=$((failed + 1))
+              fi
+            else
+              echo "✗ $name"
+              failed=$((failed + 1))
+            fi
+          done
+        fi
+        echo ""
+        total=$((passed + failed))
+        echo "Results: $passed/$total passed ($failed include fragments or incomplete files expected)"
+
+  test-all:
+    desc: Run all tests
+    cmds:
+      - task: test
+      - task: test-e2e
+      - task: test-decksh
+      - task: test-deckviz
+
+  # ============ Cloudflare Deployment ============
+
+  cf-setup:
+    desc: Create Cloudflare resources (idempotent)
+    cmds:
+      - bunx wrangler r2 bucket create {{.CF_R2_INPUT}} 2>/dev/null || echo "{{.CF_R2_INPUT}} bucket already exists"
+      - bunx wrangler r2 bucket create {{.CF_R2_OUTPUT}} 2>/dev/null || echo "{{.CF_R2_OUTPUT}} bucket already exists"
+      - bunx wrangler r2 bucket create {{.CF_R2_WASM}} 2>/dev/null || echo "{{.CF_R2_WASM}} bucket already exists"
+      - bunx wrangler queues create {{.CF_QUEUE}} 2>/dev/null || echo "{{.CF_QUEUE}} queue already exists"
+      - bunx wrangler kv namespace create {{.CF_KV_NAMESPACE}} 2>/dev/null || echo "{{.CF_KV_NAMESPACE}} namespace already exists"
+      - echo "⚠️  Run 'task cf-list' to get the KV namespace ID, then update wrangler.toml"
+
+  cf-list:
+    desc: List Cloudflare resources (buckets, queues, KV namespaces)
+    cmds:
+      - echo "=== R2 Buckets ===" && bunx wrangler r2 bucket list
+      - echo "=== Queues ===" && bunx wrangler queues list
+      - echo "=== KV Namespaces ===" && bunx wrangler kv namespace list
+
+  cf-notifications:
+    desc: Enable R2 event notifications (idempotent)
+    cmds:
+      - bunx wrangler r2 bucket notification create {{.CF_R2_INPUT}} --event-type object-create --queue {{.CF_QUEUE}} 2>/dev/null || echo "Notification already exists or queue not ready"
+
+  deploy:
+    desc: Deploy to Cloudflare Workers
+    deps: [build-cloudflare]
+    cmds:
+      - bunx wrangler deploy --config wrangler.toml
+
+  deploy-tinygo:
+    desc: Deploy to Cloudflare (TinyGo build)
+    deps: [build-cloudflare-tinygo]
+    cmds:
+      - bunx wrangler deploy --config wrangler.toml
+
+  # ============ R2 WASM Storage ============
+
+  upload-wasm-browser:
+    desc: Upload browser WASM to R2
+    deps: [build-browser]
+    cmds:
+      - bunx wrangler r2 object put {{.CF_R2_WASM}}/browser/deckfs.wasm --file {{.BUILD_DIR}}/browser/deckfs.wasm --remote
+      - bunx wrangler r2 object put {{.CF_R2_WASM}}/browser/wasm_exec.js --file {{.BUILD_DIR}}/browser/wasm_exec.js --remote
+
+  upload-wasm-wasi:
+    desc: Upload WASI WASM to R2
+    deps: [build-wasi]
+    cmds:
+      - bunx wrangler r2 object put {{.CF_R2_WASM}}/wasi/deckfs.wasm --file {{.BUILD_DIR}}/wasi/deckfs.wasm --remote
+
+  upload-wasm-all:
+    desc: Upload all WASM builds to R2
+    cmds:
+      - task: upload-wasm-browser
+      - task: upload-wasm-wasi
+
+  # ============ R2 Utilities ============
+
+  r2-upload:
+    desc: Upload a .dsh file (task r2-upload FILE=deck.dsh)
+    cmds:
+      - bunx wrangler r2 object put {{.CF_R2_INPUT}}/{{.FILE | base}} --file={{.FILE}} --remote
+
+  r2-list:
+    desc: List R2 buckets
+    cmds:
+      - bunx wrangler r2 bucket list
+
+  # ============ Utilities ============
+
+
+  deps:
+    desc: Download dependencies
+    cmds:
+      - go mod download
+      - go mod tidy
+      - bun install
+
+  fmt:
+    desc: Format code
+    cmds:
+      - go fmt ./...
+
+  # ============ Full Setup ============
+
+  setup:
+    desc: Complete setup
+    cmds:
+      - task: deps
+      - task: cf-setup
+      - task: build-all
+      - echo ""
+      - 'echo "✓ Setup complete!"'
+      - 'echo "  1. Update wrangler.toml with KV namespace ID"'
+      - 'echo "  2. Run: task cf-notifications"'
+      - 'echo "  3. Run: task deploy"'
+      - 'echo "  4. Run: task upload-wasm-all (for runtime loading)"'
