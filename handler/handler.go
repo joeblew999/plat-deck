@@ -24,6 +24,7 @@ func RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/manifest/", handleGetManifest)
 	mux.HandleFunc("/decks", handleListDecks)
 	mux.HandleFunc("/upload/", handleUpload)
+	mux.HandleFunc("/status/", handleStatus)
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +35,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"service":   "deckfs",
 		"version":   Version,
-		"endpoints": []string{"/health", "/process", "/slides/:key", "/manifest/:name", "/decks", "/upload/:key"},
+		"endpoints": []string{"/health", "/process", "/slides/:key", "/manifest/:name", "/decks", "/upload/:key", "/status/:key"},
 	})
 }
 
@@ -192,6 +193,32 @@ func handleGetManifest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	io.Copy(w, reader)
+}
+
+func handleStatus(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimPrefix(r.URL.Path, "/status/")
+	if key == "" {
+		writeError(w, "Missing key", http.StatusBadRequest)
+		return
+	}
+
+	data, err := runtime.KV().Get(r.Context(), "status:"+key)
+	if err != nil || data == nil {
+		writeJSON(w, map[string]any{
+			"key":    key,
+			"status": "unknown",
+		})
+		return
+	}
+
+	var status map[string]any
+	if err := json.Unmarshal(data, &status); err != nil {
+		writeError(w, "Invalid status data", http.StatusInternalServerError)
+		return
+	}
+
+	status["key"] = key
+	writeJSON(w, status)
 }
 
 func handleListDecks(w http.ResponseWriter, r *http.Request) {

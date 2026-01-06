@@ -34,10 +34,12 @@ func main() {
 func initRuntime() {
 	inputStorage, _ := runtime.NewR2Storage("DECKFS_INPUT")
 	outputStorage, _ := runtime.NewR2Storage("DECKFS_OUTPUT")
+	kvStore, _ := runtime.NewCloudflareKV("DECKFS_STATUS")
 
 	runtime.SetRuntime(&runtime.Runtime{
 		InputStorage:  inputStorage,
 		OutputStorage: outputStorage,
+		KV:            kvStore,
 	})
 }
 
@@ -66,9 +68,15 @@ func consumeQueue(batch *queues.MessageBatch) error {
 			continue
 		}
 
+		key := event.Object.Key
+
+		// Update status: processing
+		setStatus(key, "processing", "")
+
 		// Get source from R2
-		reader, err := runtime.Input().Get(nil, event.Object.Key)
+		reader, err := runtime.Input().Get(nil, key)
 		if err != nil {
+			setStatus(key, "error", "failed to read source")
 			msg.Retry()
 			continue
 		}
@@ -79,12 +87,13 @@ func consumeQueue(batch *queues.MessageBatch) error {
 		cfg := processor.DefaultConfig()
 		result, err := processor.ProcessDeckSH(source, cfg)
 		if err != nil {
+			setStatus(key, "error", err.Error())
 			msg.Ack() // Don't retry bad source
 			continue
 		}
 
 		// Store outputs
-		baseName := strings.TrimSuffix(event.Object.Key, ".dsh")
+		baseName := strings.TrimSuffix(key, ".dsh")
 		for i, slide := range result.Slides {
 			slideKey := baseName + "/slide-" + padInt(i+1, 4) + ".svg"
 			runtime.Output().Put(nil, slideKey, slide, "image/svg+xml")
@@ -92,13 +101,16 @@ func consumeQueue(batch *queues.MessageBatch) error {
 
 		// Store manifest
 		manifest := map[string]any{
-			"sourceKey":   event.Object.Key,
+			"sourceKey":   key,
 			"processedAt": time.Now().UTC().Format(time.RFC3339),
 			"title":       result.Title,
 			"slideCount":  result.SlideCount,
 		}
 		manifestJSON, _ := json.Marshal(manifest)
 		runtime.Output().Put(nil, baseName+"/manifest.json", manifestJSON, "application/json")
+
+		// Update status: complete
+		setStatus(key, "complete", "")
 
 		msg.Ack()
 	}
@@ -112,4 +124,16 @@ func padInt(n, width int) string {
 		n /= 10
 	}
 	return s
+}
+
+func setStatus(key, status, errMsg string) {
+	data := map[string]any{
+		"status":    status,
+		"updatedAt": time.Now().UTC().Format(time.RFC3339),
+	}
+	if errMsg != "" {
+		data["error"] = errMsg
+	}
+	jsonData, _ := json.Marshal(data)
+	runtime.KV().Put(nil, "status:"+key, jsonData)
 }

@@ -64,6 +64,14 @@ func Output() Storage {
 	return Current.OutputStorage
 }
 
+// KV returns the KV store
+func KV() KVStore {
+	if Current == nil || Current.KV == nil {
+		return &noopKV{}
+	}
+	return Current.KV
+}
+
 // noopStorage is a no-op implementation for when storage isn't configured
 type noopStorage struct{}
 
@@ -80,5 +88,20 @@ func (s *noopStorage) List(ctx context.Context, prefix string, delimiter string)
 }
 
 func (s *noopStorage) Delete(ctx context.Context, key string) error {
+	return nil
+}
+
+// noopKV is a no-op implementation for when KV isn't configured
+type noopKV struct{}
+
+func (k *noopKV) Get(ctx context.Context, key string) ([]byte, error) {
+	return nil, nil
+}
+
+func (k *noopKV) Put(ctx context.Context, key string, value []byte) error {
+	return nil
+}
+
+func (k *noopKV) Delete(ctx context.Context, key string) error {
 	return nil
 }

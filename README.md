@@ -69,12 +69,16 @@ task build-all
 ### Deploy to Cloudflare
 
 ```bash
-wrangler login
+# Set up environment
+cp .env.example .env
+# Edit .env with your CLOUDFLARE_API_TOKEN
+
+# Deploy
 task cf-setup          # Create R2 buckets, KV, Queue
-# Update wrangler.toml with KV namespace ID
+# Update wrangler.toml with KV namespace ID from output
 task cf-notifications  # Enable R2 events
-task deploy           # Deploy worker
-task upload-wasm-all  # Upload WASM modules to R2
+task cf-deploy         # Deploy worker
+task r2-upload-wasm    # Upload WASM modules to R2
 ```
 
 ### Run with Wazero
@@ -164,6 +168,23 @@ All runtimes expose the same API:
 | `/slides/:key` | GET | Get SVG from R2 |
 | `/manifest/:name` | GET | Get manifest |
 | `/decks` | GET | List processed decks |
+| `/status/:key` | GET | Get processing status (from KV) |
+
+## Browser Demo
+
+Open `demo/index.html` in a browser to try the API interactively.
+
+## Tasks
+
+Run `task --list` to see all available tasks:
+
+```
+build-*         Build targets (cloudflare, browser, wasi, wazero-host, cli)
+cf-*            Cloudflare management (setup, deploy, list, teardown)
+r2-*            R2 storage operations (upload, upload-wasm)
+test-*          Tests (unit, e2e, decksh, deckviz)
+dev-*           Local development servers
+```
 
 ## License
 

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeckFS Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00d4ff;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 30px;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 900px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+        }
+        .panel {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .panel h2 {
+            margin-top: 0;
+            color: #00d4ff;
+            font-size: 1.1rem;
+        }
+        textarea {
+            width: 100%;
+            height: 300px;
+            background: #0f0f23;
+            color: #00ff88;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 12px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            resize: vertical;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        button {
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #00a8cc;
+        }
+        button:disabled {
+            background: #555;
+            color: #888;
+            cursor: not-allowed;
+        }
+        .status {
+            color: #888;
+            font-size: 0.9rem;
+        }
+        .status.processing {
+            color: #ffcc00;
+        }
+        .status.success {
+            color: #00ff88;
+        }
+        .status.error {
+            color: #ff4444;
+        }
+        .slide-container {
+            background: #fff;
+            border-radius: 4px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .slide-container svg {
+            width: 100%;
+            height: 100%;
+        }
+        .slide-nav {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .slide-nav button {
+            padding: 8px 16px;
+        }
+        .slide-info {
+            color: #888;
+            font-size: 0.9rem;
+        }
+        .examples {
+            margin-top: 15px;
+        }
+        .examples select {
+            background: #0f0f23;
+            color: #eee;
+            border: 1px solid #333;
+            padding: 8px 12px;
+            border-radius: 4px;
+            width: 100%;
+        }
+        .api-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #0f0f23;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .api-info code {
+            color: #00ff88;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DeckFS Demo</h1>
+        <p class="subtitle">Convert decksh markup to SVG slides</p>
+
+        <div class="layout">
+            <div class="panel">
+                <h2>Decksh Source</h2>
+                <textarea id="source" placeholder="Enter decksh markup...">deck
+    slide "white" "black"
+        ctext "Hello DeckFS" 50 50 5
+        text "Convert decksh to SVG" 50 60 2.5 "sans" "gray"
+    eslide
+
+    slide "navy" "white"
+        ctext "Slide 2" 50 45 6
+        rect 50 65 30 10 "dodgerblue"
+        circle 30 65 5 "red"
+        circle 70 65 5 "green"
+    eslide
+
+    slide "white" "black"
+        ctext "Features" 50 20 4
+        list 20 35 2.5 "sans" "black" 100
+            li "Fast WASM-based rendering"
+            li "Multiple output formats"
+            li "Cloud-native architecture"
+            li "Queue-based processing"
+        elist
+    eslide
+edeck</textarea>
+                <div class="controls">
+                    <button id="process">Process</button>
+                    <span id="status" class="status"></span>
+                </div>
+                <div class="examples">
+                    <select id="examples">
+                        <option value="">Load example...</option>
+                        <option value="simple">Simple Slide</option>
+                        <option value="shapes">Shapes Demo</option>
+                        <option value="list">List Example</option>
+                        <option value="gradient">Gradient Background</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Preview</h2>
+                <div class="slide-container" id="preview">
+                    <span style="color: #888;">Click "Process" to render slides</span>
+                </div>
+                <div class="slide-nav">
+                    <button id="prev" disabled>&larr; Prev</button>
+                    <span class="slide-info" id="slideInfo">-</span>
+                    <button id="next" disabled>Next &rarr;</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="api-info">
+            <strong>API Endpoint:</strong> <code id="apiUrl">https://deckfs.gedw99.workers.dev/process</code>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://deckfs.gedw99.workers.dev/process';
+
+        const examples = {
+            simple: `deck
+    slide "white" "black"
+        ctext "Hello World" 50 50 5
+    eslide
+edeck`,
+            shapes: `deck
+    slide "white" "black"
+        ctext "Shapes" 50 15 4
+        rect 25 40 15 20 "blue"
+        square 50 40 15 "green"
+        circle 75 40 8 "red"
+        ellipse 25 70 10 5 "purple"
+        line 40 70 60 70 0.5 "orange"
+        polygon "65 65 75 75 85 65" "cyan"
+    eslide
+edeck`,
+            list: `deck
+    slide "white" "black"
+        text "Features" 10 15 3 "sans" "navy"
+        list 10 30 2 "sans" "black" 100
+            li "Easy to write"
+            li "Fast rendering"
+            li "SVG output"
+            li "Cloud native"
+            li "WASM powered"
+        elist
+    eslide
+edeck`,
+            gradient: `deck
+    slide "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" "white"
+        ctext "Gradient" 50 45 6
+        ctext "Background" 50 55 3
+    eslide
+edeck`
+        };
+
+        let slides = [];
+        let currentSlide = 0;
+
+        const sourceEl = document.getElementById('source');
+        const processBtn = document.getElementById('process');
+        const statusEl = document.getElementById('status');
+        const previewEl = document.getElementById('preview');
+        const prevBtn = document.getElementById('prev');
+        const nextBtn = document.getElementById('next');
+        const slideInfoEl = document.getElementById('slideInfo');
+        const examplesEl = document.getElementById('examples');
+
+        function setStatus(text, type = '') {
+            statusEl.textContent = text;
+            statusEl.className = 'status ' + type;
+        }
+
+        function updateNav() {
+            prevBtn.disabled = currentSlide <= 0;
+            nextBtn.disabled = currentSlide >= slides.length - 1;
+            slideInfoEl.textContent = slides.length > 0
+                ? `${currentSlide + 1} / ${slides.length}`
+                : '-';
+        }
+
+        function showSlide(index) {
+            if (index >= 0 && index < slides.length) {
+                currentSlide = index;
+                previewEl.innerHTML = slides[index];
+                updateNav();
+            }
+        }
+
+        async function process() {
+            const source = sourceEl.value.trim();
+            if (!source) {
+                setStatus('Please enter decksh source', 'error');
+                return;
+            }
+
+            processBtn.disabled = true;
+            setStatus('Processing...', 'processing');
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: source
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    slides = data.slides;
+                    currentSlide = 0;
+                    showSlide(0);
+                    setStatus(`Rendered ${data.slideCount} slide(s)`, 'success');
+                } else {
+                    setStatus(data.error || 'Processing failed', 'error');
+                    previewEl.innerHTML = '<span style="color: #888;">Error rendering slides</span>';
+                }
+            } catch (err) {
+                setStatus('Network error: ' + err.message, 'error');
+            } finally {
+                processBtn.disabled = false;
+            }
+        }
+
+        processBtn.addEventListener('click', process);
+        prevBtn.addEventListener('click', () => showSlide(currentSlide - 1));
+        nextBtn.addEventListener('click', () => showSlide(currentSlide + 1));
+
+        examplesEl.addEventListener('change', (e) => {
+            if (examples[e.target.value]) {
+                sourceEl.value = examples[e.target.value];
+                examplesEl.value = '';
+            }
+        });
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') showSlide(currentSlide - 1);
+            if (e.key === 'ArrowRight') showSlide(currentSlide + 1);
+        });
+
+        updateNav();
+    </script>
+</body>
+</html>
