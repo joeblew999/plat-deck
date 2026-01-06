@@ -34,24 +34,7 @@ tasks:
       - rm -rf {{.BUILD_DIR}}
 
   build-cloudflare:
-    desc: Build for Cloudflare Workers (syumai/workers)
-    cmds:
-      - mkdir -p {{.BUILD_DIR}}/cloudflare
-      - go run github.com/syumai/workers/cmd/workers-assets-gen@latest -o {{.BUILD_DIR}}/cloudflare
-      - GOOS=js GOARCH=wasm go build -tags cloudflare -o {{.BUILD_DIR}}/cloudflare/app.wasm ./cmd/cloudflare
-    sources:
-      - cmd/cloudflare/**/*.go
-      - handler/**/*.go
-      - runtime/**/*.go
-      - internal/**/*.go
-      - go.mod
-      - go.sum
-    generates:
-      - "{{.BUILD_DIR}}/cloudflare/app.wasm"
-      - "{{.BUILD_DIR}}/cloudflare/worker.mjs"
-
-  build-cloudflare-tinygo:
-    desc: Build for Cloudflare with TinyGo (smaller binary)
+    desc: Build for Cloudflare Workers (TinyGo required)
     cmds:
       - mkdir -p {{.BUILD_DIR}}/cloudflare
       - go run github.com/syumai/workers/cmd/workers-assets-gen@latest -o {{.BUILD_DIR}}/cloudflare
@@ -314,12 +297,6 @@ tasks:
   cf-deploy:
     desc: Deploy to Cloudflare Workers
     deps: [build-cloudflare]
-    cmds:
-      - bunx wrangler deploy --config wrangler.toml
-
-  cf-deploy-tinygo:
-    desc: Deploy to Cloudflare (TinyGo build)
-    deps: [build-cloudflare-tinygo]
     cmds:
       - bunx wrangler deploy --config wrangler.toml
 

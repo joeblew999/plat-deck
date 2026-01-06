@@ -1,6 +1,7 @@
 name = "deckfs"
 main = ".bin/cloudflare/worker.mjs"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
 
 # R2 Buckets
 [[r2_buckets]]

@@ -17,14 +17,28 @@ const Version = "0.1.0"
 
 // RegisterHandlers registers all HTTP handlers
 func RegisterHandlers(mux *http.ServeMux) {
-	mux.HandleFunc("/", handleRoot)
-	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/process", handleProcess)
-	mux.HandleFunc("/slides/", handleGetSlide)
-	mux.HandleFunc("/manifest/", handleGetManifest)
-	mux.HandleFunc("/decks", handleListDecks)
-	mux.HandleFunc("/upload/", handleUpload)
-	mux.HandleFunc("/status/", handleStatus)
+	mux.HandleFunc("/", cors(handleRoot))
+	mux.HandleFunc("/health", cors(handleHealth))
+	mux.HandleFunc("/process", cors(handleProcess))
+	mux.HandleFunc("/slides/", cors(handleGetSlide))
+	mux.HandleFunc("/manifest/", cors(handleGetManifest))
+	mux.HandleFunc("/decks", cors(handleListDecks))
+	mux.HandleFunc("/upload/", cors(handleUpload))
+	mux.HandleFunc("/status/", cors(handleStatus))
+}
+
+// cors wraps a handler with CORS headers
+func cors(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		h(w, r)
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
