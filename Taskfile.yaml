@@ -5,6 +5,10 @@ dotenv: ['.env']
 vars:
   BUILD_DIR: .bin
   SOURCE_DIR: .src
+  # Ports
+  PORT_WRANGLER: 8787
+  PORT_WAZERO: 8080
+  PORT_DEMO: 3000
   # Test data repos
   DECKVIZ_REPO: https://github.com/ajstarks/deckviz.git
   DECKSH_REPO: https://github.com/ajstarks/decksh.git
@@ -15,6 +19,8 @@ vars:
   CF_R2_WASM: deckfs-wasm
   CF_QUEUE: deckfs-events
   CF_KV_NAMESPACE: DECKFS_STATUS
+  # Common source patterns
+  GO_SOURCES: "handler/**/*.go runtime/**/*.go internal/**/*.go go.mod go.sum"
 
 env:
   GOWORK: off
@@ -25,6 +31,27 @@ tasks:
     desc: Show available tasks
     cmds:
       - task --list
+    silent: true
+
+  info:
+    desc: Show project info and quick start guide
+    cmds:
+      - |
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║                         DeckFS                               ║"
+        echo "║        Convert decksh markup to SVG slides via WASM          ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
+        echo ""
+        echo "Quick Start:"
+        echo "  task dev-wazero    # Start local server on :{{.PORT_WAZERO}}"
+        echo "  task dev-demo      # Serve demo on :{{.PORT_DEMO}}"
+        echo "  open http://localhost:{{.PORT_DEMO}}"
+        echo ""
+        echo "Production:"
+        echo "  task cf-deploy     # Deploy to Cloudflare Workers"
+        echo ""
+        echo "Run 'task --list' for all available tasks"
+    silent: true
 
   # ============ Build ============
 
@@ -123,20 +150,27 @@ tasks:
   # ============ Dev ============
 
   dev:
-    desc: Run Cloudflare worker locally
+    desc: Run Cloudflare worker locally (wrangler)
     deps: [build-cloudflare]
     cmds:
-      - lsof -ti :8787 | xargs kill -9 2>/dev/null || true
-      - echo "Starting wrangler dev server at http://localhost:8787"
+      - lsof -ti :{{.PORT_WRANGLER}} | xargs kill -9 2>/dev/null || true
+      - echo "Starting wrangler dev server at http://localhost:{{.PORT_WRANGLER}}"
       - bunx wrangler dev --config wrangler.toml
 
   dev-wazero:
     desc: Run wazero host locally
     deps: [build-wasi, build-wazero-host]
     cmds:
-      - lsof -ti :8080 | xargs kill -9 2>/dev/null || true
-      - echo "Starting wazero host at http://localhost:8080"
-      - ./{{.BUILD_DIR}}/wazero/deckfs-host -wasm-file {{.BUILD_DIR}}/wasi/deckfs.wasm -addr :8080
+      - lsof -ti :{{.PORT_WAZERO}} | xargs kill -9 2>/dev/null || true
+      - echo "Starting wazero host at http://localhost:{{.PORT_WAZERO}}"
+      - ./{{.BUILD_DIR}}/wazero/deckfs-host -wasm-file {{.BUILD_DIR}}/wasi/deckfs.wasm -addr :{{.PORT_WAZERO}}
+
+  dev-demo:
+    desc: Serve demo folder for browser testing
+    cmds:
+      - lsof -ti :{{.PORT_DEMO}} | xargs kill -9 2>/dev/null || true
+      - echo "Serving demo at http://localhost:{{.PORT_DEMO}}"
+      - cd demo && python3 -m http.server {{.PORT_DEMO}}
 
   test:
     desc: Run tests
@@ -337,7 +371,6 @@ tasks:
 
   # ============ Utilities ============
 
-
   deps:
     desc: Download dependencies
     cmds:
@@ -349,6 +382,28 @@ tasks:
     desc: Format code
     cmds:
       - go fmt ./...
+
+  lint:
+    desc: Run linters
+    cmds:
+      - go vet ./...
+      - which golangci-lint > /dev/null && golangci-lint run || echo "golangci-lint not installed, skipping"
+
+  check:
+    desc: Run all checks (fmt, lint, test)
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: test
+
+  clean:
+    desc: Clean all build artifacts and caches
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+      - rm -rf {{.SOURCE_DIR}}
+      - rm -rf .wrangler
+      - rm -rf node_modules
+      - go clean -cache
 
   # ============ Full Setup ============
 
