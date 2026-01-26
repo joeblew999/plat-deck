@@ -125,48 +125,87 @@ func (p *NativePipeline) ProcessWithWorkDir(ctx context.Context, source []byte, 
 
 // renderSlides renders all slides using the specified renderer
 func (p *NativePipeline) renderSlides(ctx context.Context, rendererBin string, xmlData []byte, slideCount int, format OutputFormat) ([][]byte, error) {
-	slides := make([][]byte, slideCount)
+	// Create temp directory for processing
+	tmpDir, err := os.MkdirTemp("", "deckfs-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
 
-	if format == FormatSVG {
-		// SVG: svgdeck requires file input and outputs to files
-		// Create temp directory for processing
-		tmpDir, err := os.MkdirTemp("", "deckfs-*")
+	// Write XML to temp file
+	xmlFile := filepath.Join(tmpDir, "deck.xml")
+	if err := os.WriteFile(xmlFile, xmlData, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write XML file: %w", err)
+	}
+
+	// Get fontdir from environment or default to .src/deckfonts
+	fontDir := os.Getenv("DECKFONTS")
+	if fontDir == "" {
+		fontDir = ".src/deckfonts"
+	}
+
+	// Convert to absolute path
+	absFontDir, err := filepath.Abs(fontDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for fontDir: %w", err)
+	}
+
+	// PDF needs special handling: generate all pages in one command
+	if format == FormatPDF {
+		// Generate single multi-page PDF
+		cmd := exec.CommandContext(ctx, rendererBin, "-pages", fmt.Sprintf("1-%d", slideCount), "-fontdir", absFontDir, "-outdir", tmpDir, xmlFile)
+		var errBuf bytes.Buffer
+		cmd.Stderr = &errBuf
+
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("pdf failed: %w\nstderr: %s", err, errBuf.String())
+		}
+
+		// Read the single PDF file
+		pdfFile := filepath.Join(tmpDir, "deck.pdf")
+		pdfData, err := os.ReadFile(pdfFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create temp dir: %w", err)
-		}
-		defer os.RemoveAll(tmpDir)
-
-		// Write XML to temp file
-		xmlFile := filepath.Join(tmpDir, "deck.xml")
-		if err := os.WriteFile(xmlFile, xmlData, 0644); err != nil {
-			return nil, fmt.Errorf("failed to write XML file: %w", err)
+			return nil, fmt.Errorf("failed to read generated pdf: %w", err)
 		}
 
-		// Generate each slide separately using -pages flag (e.g., -pages 1-1)
-		for i := 0; i < slideCount; i++ {
-			pageNum := i + 1
-			cmd := exec.CommandContext(ctx, rendererBin, "-pages", fmt.Sprintf("%d-%d", pageNum, pageNum), "-outdir", tmpDir, xmlFile)
-			var errBuf bytes.Buffer
-			cmd.Stderr = &errBuf
+		// Return as single-element slice (multi-page PDF document)
+		return [][]byte{pdfData}, nil
+	}
 
-			if err := cmd.Run(); err != nil {
-				return nil, fmt.Errorf("svgdeck failed on slide %d: %w\nstderr: %s", pageNum, err, errBuf.String())
-			}
+	// SVG/PNG: Generate each slide separately
+	slides := make([][]byte, slideCount)
+	for i := 0; i < slideCount; i++ {
+		pageNum := i + 1
+		var cmd *exec.Cmd
 
-			// Read the generated SVG file (format: deck-00001.svg, deck-00002.svg, etc.)
-			svgFile := filepath.Join(tmpDir, fmt.Sprintf("deck-%05d.svg", pageNum))
-			svgData, err := os.ReadFile(svgFile)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read generated SVG for slide %d: %w", pageNum, err)
-			}
-
-			slides[i] = svgData
+		switch format {
+		case FormatSVG:
+			cmd = exec.CommandContext(ctx, rendererBin, "-pages", fmt.Sprintf("%d-%d", pageNum, pageNum), "-outdir", tmpDir, xmlFile)
+		case FormatPNG:
+			cmd = exec.CommandContext(ctx, rendererBin, "-pages", fmt.Sprintf("%d-%d", pageNum, pageNum), "-fontdir", absFontDir, "-outdir", tmpDir, xmlFile)
 		}
-	} else {
-		// PNG/PDF: generate all slides in one go
-		// The renderer outputs files, so we need to handle that differently
-		// For now, return error as this requires more complex implementation
-		return nil, fmt.Errorf("PNG/PDF rendering not yet implemented in native pipeline")
+
+		var errBuf bytes.Buffer
+		cmd.Stderr = &errBuf
+
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("%s failed on slide %d: %w\nstderr: %s", format, pageNum, err, errBuf.String())
+		}
+
+		// Read the generated file (format: deck-00001.{svg|png})
+		var ext string
+		if format == FormatSVG {
+			ext = "svg"
+		} else {
+			ext = "png"
+		}
+		outputFile := filepath.Join(tmpDir, fmt.Sprintf("deck-%05d.%s", pageNum, ext))
+		fileData, err := os.ReadFile(outputFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read generated %s for slide %d: %w", format, pageNum, err)
+		}
+
+		slides[i] = fileData
 	}
 
 	return slides, nil

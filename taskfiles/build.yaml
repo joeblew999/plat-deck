@@ -65,6 +65,7 @@ tasks:
       - handler/**/*.go
       - runtime/**/*.go
       - internal/**/*.go
+      - pkg/**/*.go
       - go.mod
       - go.sum
     generates:
@@ -80,6 +81,7 @@ tasks:
       - handler/**/*.go
       - runtime/**/*.go
       - internal/**/*.go
+      - pkg/**/*.go
       - go.mod
       - go.sum
     generates:
