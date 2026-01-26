@@ -147,14 +147,16 @@
                 <div class="panel-header">
                     <h2>Decksh Source</h2>
                     <div class="toolbar">
-                        <select id="examples">
-                            <option value="">Examples</option>
-                            <option value="simple">Simple</option>
-                            <option value="shapes">Shapes</option>
-                            <option value="list">List</option>
-                            <option value="gradient">Gradient</option>
+                        <input type="text" id="search" placeholder="Search..." style="padding: 6px 10px; background: #0f0f23; color: #eee; border: 1px solid #333; border-radius: 4px; font-size: 0.85rem; width: 120px;">
+                        <select id="examples" style="min-width: 180px;">
+                            <option value="">Loading...</option>
+                        </select>
+                        <select id="filter" style="min-width: 120px;">
+                            <option value="all">All Files</option>
+                            <option value="renderable" selected>Renderable</option>
                         </select>
                     </div>
+                </div>
                 </div>
                 <textarea id="source" placeholder="Enter decksh markup...">deck
     slide "white" "black"
@@ -327,16 +329,43 @@ edeck</textarea>
         // Load examples list from API
         async function loadExamplesList() {
             try {
-                const response = await fetch(API_BASE + '/examples?renderable=true');
+                const filterMode = document.getElementById('filter').value;
+                const url = filterMode === 'renderable' 
+                    ? API_BASE + '/examples?renderable=true'
+                    : API_BASE + '/examples';
+                
+                const response = await fetch(url);
                 examplesList = await response.json();
 
-                // Populate dropdown
-                examplesEl.innerHTML = '<option value="">Examples (' + examplesList.length + ')</option>';
+                // Group by directory
+                const groups = {};
                 examplesList.forEach(ex => {
-                    const opt = document.createElement('option');
-                    opt.value = ex.path;
-                    opt.textContent = ex.name;
-                    examplesEl.appendChild(opt);
+                    const parts = ex.name.split('/');
+                    const dir = parts.length > 1 ? parts[0] : 'root';
+                    if (!groups[dir]) groups[dir] = [];
+                    groups[dir].push(ex);
+                });
+
+                // Populate dropdown with optgroups
+                const modeLabel = filterMode === 'renderable' ? ' Renderable' : ' All';
+                examplesEl.innerHTML = `<option value="">Examples (${examplesList.length}${modeLabel})</option>`;
+                
+                Object.keys(groups).sort().forEach(dir => {
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = dir.charAt(0).toUpperCase() + dir.slice(1);
+                    groups[dir].forEach(ex => {
+                        const opt = document.createElement('option');
+                        opt.value = ex.path;
+                        const fileName = ex.name.split('/').pop();
+                        opt.textContent = fileName;
+                        if (ex.renderable === false) {
+                            opt.textContent += ' [lib]';
+                            opt.style.color = '#888';
+                            opt.style.fontStyle = 'italic';
+                        }
+                        optgroup.appendChild(opt);
+                    });
+                    examplesEl.appendChild(optgroup);
                 });
             } catch (err) {
                 console.error('Failed to load examples:', err);
@@ -371,6 +400,26 @@ edeck</textarea>
         });
 
         updateNav();
+        // Search functionality
+        document.getElementById('search').addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            const optgroups = document.getElementById('examples').querySelectorAll('optgroup');
+            
+            optgroups.forEach(group => {
+                let hasVisibleOptions = false;
+                Array.from(group.children).forEach(opt => {
+                    const text = opt.textContent.toLowerCase();
+                    const matches = searchTerm === '' || text.includes(searchTerm);
+                    opt.style.display = matches ? '' : 'none';
+                    if (matches && opt.value) hasVisibleOptions = true;
+                });
+                group.style.display = hasVisibleOptions ? '' : 'none';
+            });
+        });
+
+        // Filter change handler
+        document.getElementById('filter').addEventListener('change', loadExamplesList);
+
         loadExamplesList();
     </script>
 </body>
