@@ -223,9 +223,13 @@ func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleExamplesList(w http.ResponseWriter, r *http.Request) {
 	type Example struct {
-		Name string `json:"name"`
-		Path string `json:"path"`
+		Name       string `json:"name"`
+		Path       string `json:"path"`
+		Renderable bool   `json:"renderable,omitempty"`
 	}
+
+	// Check if we should filter to only renderable decks
+	filterRenderable := r.URL.Query().Get("renderable") == "true"
 
 	var examples []Example
 
@@ -235,14 +239,35 @@ func (s *Server) handleExamplesList(w http.ResponseWriter, r *http.Request) {
 		}
 		if !d.IsDir() && strings.HasSuffix(path, ".dsh") {
 			relPath, _ := filepath.Rel(s.examplesDir, path)
+			
+			// Check if file is renderable (contains "deck" keyword)
+			isRenderable := false
+			if filterRenderable {
+				content, err := os.ReadFile(path)
+				if err == nil {
+					// Check if file contains deck/edeck structure
+					contentStr := string(content)
+					isRenderable = strings.HasPrefix(contentStr, "deck\n") ||
+						strings.HasPrefix(contentStr, "deck ") ||
+						strings.Contains(contentStr, "\ndeck\n") ||
+						strings.Contains(contentStr, "\ndeck ")
+				}
+				
+				// Skip non-renderable files if filter is enabled
+				if !isRenderable {
+					return nil
+				}
+			}
+
 			name := strings.TrimSuffix(filepath.Base(path), ".dsh")
 			dir := filepath.Dir(relPath)
 			if dir != "." {
 				name = dir + "/" + name
 			}
 			examples = append(examples, Example{
-				Name: name,
-				Path: relPath,
+				Name:       name,
+				Path:       relPath,
+				Renderable: isRenderable,
 			})
 		}
 		return nil

@@ -327,7 +327,7 @@ edeck</textarea>
         // Load examples list from API
         async function loadExamplesList() {
             try {
-                const response = await fetch(API_BASE + '/examples');
+                const response = await fetch(API_BASE + '/examples?renderable=true');
                 examplesList = await response.json();
 
                 // Populate dropdown
