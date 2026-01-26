@@ -202,6 +202,7 @@ edeck</textarea>
                     <button id="prev" disabled>&larr; Prev</button>
                     <span class="slide-info" id="slideInfo">-</span>
                     <button id="next" disabled>Next &rarr;</button>
+                    <button id="shareDeck" disabled style="margin-left: auto;" title="Open deck in new tab">📤 Share</button>
                 </div>
             </div>
         </div>
@@ -237,6 +238,7 @@ edeck</textarea>
         const prevBtn = document.getElementById('prev');
         const nextBtn = document.getElementById('next');
         const slideInfoEl = document.getElementById('slideInfo');
+        const shareDeckBtn = document.getElementById('shareDeck');
         const examplesEl = document.getElementById('examples');
         const apiSelectEl = document.getElementById('apiSelect');
 
@@ -266,6 +268,8 @@ edeck</textarea>
             prevBtn.disabled = currentSlide <= 0;
             nextBtn.disabled = currentSlide >= slides.length - 1;
             slideInfoEl.textContent = slides.length > 0 ? `${currentSlide + 1} / ${slides.length}` : '-';
+            // Enable share button only when viewing a deck from examples
+            shareDeckBtn.disabled = !currentSourcePath || slides.length === 0;
         }
 
         function showSlide(index) {
@@ -321,9 +325,17 @@ edeck</textarea>
         prevBtn.addEventListener('click', () => showSlide(currentSlide - 1));
         nextBtn.addEventListener('click', () => showSlide(currentSlide + 1));
 
+        shareDeckBtn.addEventListener('click', () => {
+            if (currentSourcePath) {
+                const deckUrl = `${API_BASE}/deck/${currentSourcePath}/slide/${currentSlide + 1}.svg`;
+                window.open(deckUrl, '_blank');
+            }
+        });
+
         // Clear source path when user manually edits
         sourceEl.addEventListener('input', () => {
             currentSourcePath = '';
+            updateNav(); // Update share button state
         });
 
         // Load examples list from API

@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/joeblew999/deckfs/pkg/pipeline"
 )
@@ -38,6 +40,7 @@ func main() {
 	server := &Server{
 		pipeline:    pipe,
 		examplesDir: *examplesDir,
+		deckCache:   NewDeckCache(),
 	}
 
 	log.Printf("Starting server on %s", *addr)
@@ -51,6 +54,26 @@ func main() {
 type Server struct {
 	pipeline    *pipeline.NativePipeline
 	examplesDir string
+	deckCache   *DeckCache
+}
+
+// DeckCache stores rendered decks in memory
+type DeckCache struct {
+	mu    sync.RWMutex
+	decks map[string]*CachedDeck
+}
+
+// CachedDeck stores the rendered slides for a deck
+type CachedDeck struct {
+	ExamplePath string
+	Slides      [][]byte
+	SlideCount  int
+}
+
+func NewDeckCache() *DeckCache {
+	return &DeckCache{
+		decks: make(map[string]*CachedDeck),
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +108,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case strings.HasPrefix(r.URL.Path, "/examples/"):
 		s.handleExampleContent(w, r)
+
+	case strings.HasPrefix(r.URL.Path, "/deck/"):
+		// Deck routing: /deck/:examplePath/slide/:num.svg or /deck/:examplePath/asset/:filename
+		s.handleDeckRoute(w, r)
 
 	default:
 		http.NotFound(w, r)
@@ -310,4 +337,183 @@ func (s *Server) handleDemo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(content)
+}
+
+func (s *Server) handleDeckRoute(w http.ResponseWriter, r *http.Request) {
+	// Parse URL: /deck/:examplePath/slide/:num.svg or /deck/:examplePath/asset/:filename
+	path := strings.TrimPrefix(r.URL.Path, "/deck/")
+
+	// Extract examplePath and route type
+	var examplePath string
+	var routeType string
+	var routeParam string
+
+	if strings.Contains(path, "/slide/") {
+		parts := strings.SplitN(path, "/slide/", 2)
+		examplePath = parts[0]
+		routeType = "slide"
+		routeParam = parts[1]
+	} else if strings.Contains(path, "/asset/") {
+		parts := strings.SplitN(path, "/asset/", 2)
+		examplePath = parts[0]
+		routeType = "asset"
+		routeParam = parts[1]
+	} else {
+		// Just the deck path - redirect to slide 1
+		examplePath = path
+		http.Redirect(w, r, fmt.Sprintf("/deck/%s/slide/1.svg", examplePath), http.StatusFound)
+		return
+	}
+
+	// Security: prevent path traversal
+	if strings.Contains(examplePath, "..") || strings.Contains(routeParam, "..") {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	switch routeType {
+	case "slide":
+		s.handleDeckSlide(w, r, examplePath, routeParam)
+	case "asset":
+		s.handleDeckAsset(w, r, examplePath, routeParam)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleDeckSlide(w http.ResponseWriter, r *http.Request, examplePath string, slideParam string) {
+	// Parse slide number from "1.svg" -> 1
+	slideNum := 0
+	fmt.Sscanf(slideParam, "%d.svg", &slideNum)
+	if slideNum < 1 {
+		http.Error(w, "Invalid slide number", http.StatusBadRequest)
+		return
+	}
+
+	// Get or render deck
+	deck, err := s.getOrRenderDeck(r, examplePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to render deck: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Check slide exists
+	if slideNum > deck.SlideCount {
+		http.Error(w, "Slide not found", http.StatusNotFound)
+		return
+	}
+
+	// Get slide (1-indexed)
+	slide := deck.Slides[slideNum-1]
+
+	// Rewrite links in SVG
+	rewrittenSlide := s.rewriteSVGLinks(slide, examplePath)
+
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Write(rewrittenSlide)
+}
+
+func (s *Server) handleDeckAsset(w http.ResponseWriter, r *http.Request, examplePath string, filename string) {
+	// Serve asset file from deck directory
+	deckDir := filepath.Join(s.examplesDir, filepath.Dir(examplePath))
+	assetPath := filepath.Join(deckDir, filename)
+
+	// Security: ensure asset is within deck directory
+	absAssetPath, err := filepath.Abs(assetPath)
+	if err != nil {
+		http.Error(w, "Invalid asset path", http.StatusBadRequest)
+		return
+	}
+	absDeckDir, err := filepath.Abs(deckDir)
+	if err != nil {
+		http.Error(w, "Invalid deck path", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(absAssetPath, absDeckDir) {
+		http.Error(w, "Asset path outside deck directory", http.StatusForbidden)
+		return
+	}
+
+	http.ServeFile(w, r, assetPath)
+}
+
+func (s *Server) getOrRenderDeck(r *http.Request, examplePath string) (*CachedDeck, error) {
+	// Check cache first
+	s.deckCache.mu.RLock()
+	cached, ok := s.deckCache.decks[examplePath]
+	s.deckCache.mu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	// Render deck
+	s.deckCache.mu.Lock()
+	defer s.deckCache.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if cached, ok := s.deckCache.decks[examplePath]; ok {
+		return cached, nil
+	}
+
+	// Read deck source
+	fullPath := filepath.Join(s.examplesDir, examplePath)
+	source, err := os.ReadFile(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read deck: %w", err)
+	}
+
+	// Get working directory for import resolution
+	workDir := filepath.Dir(fullPath)
+
+	// Render with SVG format
+	result, err := s.pipeline.ProcessWithWorkDir(r.Context(), source, pipeline.FormatSVG, workDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process deck: %w", err)
+	}
+
+	// Cache the rendered deck
+	deck := &CachedDeck{
+		ExamplePath: examplePath,
+		Slides:      result.Slides,
+		SlideCount:  result.SlideCount,
+	}
+	s.deckCache.decks[examplePath] = deck
+
+	return deck, nil
+}
+
+func (s *Server) rewriteSVGLinks(svg []byte, examplePath string) []byte {
+	svgStr := string(svg)
+
+	// Rewrite temporary file path links to deck URLs
+	// Pattern: /var/folders/.../T/deckfs-NNNN/deck-00001.svg
+	linkPattern := regexp.MustCompile(`xlink:href="[^"]*(/deck-(\d{5})\.svg)"`)
+
+	rewritten := linkPattern.ReplaceAllStringFunc(svgStr, func(match string) string {
+		// Extract slide number from deck-00001.svg
+		submatches := linkPattern.FindStringSubmatch(match)
+		if len(submatches) >= 3 {
+			slideNum := submatches[2]
+			// Convert to integer to remove leading zeros
+			num := 0
+			fmt.Sscanf(slideNum, "%d", &num)
+			return fmt.Sprintf(`xlink:href="/deck/%s/slide/%d.svg"`, examplePath, num)
+		}
+		return match
+	})
+
+	// Rewrite image asset references
+	// Pattern: xlink:href="filename.png"
+	assetPattern := regexp.MustCompile(`xlink:href="([^"/][^"]*\.(png|jpg|jpeg|gif|svg))"`)
+
+	rewritten = assetPattern.ReplaceAllStringFunc(rewritten, func(match string) string {
+		submatches := assetPattern.FindStringSubmatch(match)
+		if len(submatches) >= 2 {
+			filename := submatches[1]
+			return fmt.Sprintf(`xlink:href="/deck/%s/asset/%s"`, examplePath, filename)
+		}
+		return match
+	})
+
+	return []byte(rewritten)
 }
