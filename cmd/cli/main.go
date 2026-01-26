@@ -48,39 +48,38 @@ func printUsage() {
 func doProcess() {
 	var source []byte
 	var err error
+	var workDir string
+
+	// Initialize pipeline BEFORE changing directories
+	// This ensures binary paths are resolved from current directory
+	binDir := os.Getenv("DECKFS_BIN_DIR")
+	if binDir == "" {
+		binDir = ".bin/deck"
+	}
+	p, err := pipeline.NewNativePipeline(binDir)
+	if err != nil {
+		outputError(fmt.Sprintf("Failed to initialize pipeline: %v", err))
+		os.Exit(1)
+	}
 
 	// Check if file argument provided
 	if len(os.Args) > 2 {
 		filePath := os.Args[2]
 
-		// Get absolute path and directory
+		// Read the file
+		source, err = os.ReadFile(filePath)
+		if err != nil {
+			outputError(fmt.Sprintf("Failed to read file: %v", err))
+			os.Exit(1)
+		}
+
+		// Get directory for resolving imports
 		absPath, err := filepath.Abs(filePath)
 		if err != nil {
 			outputError(fmt.Sprintf("Failed to resolve path: %v", err))
 			os.Exit(1)
 		}
-
-		fileDir := filepath.Dir(absPath)
-
-		// Change to file's directory so includes resolve correctly
-		origDir, err := os.Getwd()
-		if err != nil {
-			outputError(fmt.Sprintf("Failed to get working directory: %v", err))
-			os.Exit(1)
-		}
-
-		if err := os.Chdir(fileDir); err != nil {
-			outputError(fmt.Sprintf("Failed to change directory: %v", err))
-			os.Exit(1)
-		}
-		defer os.Chdir(origDir)
-
-		// Read the file
-		source, err = os.ReadFile(filepath.Base(absPath))
-		if err != nil {
-			outputError(fmt.Sprintf("Failed to read file: %v", err))
-			os.Exit(1)
-		}
+		workDir = filepath.Dir(absPath)
 	} else {
 		// Read from stdin (legacy mode - includes won't work properly)
 		source, err = io.ReadAll(os.Stdin)
@@ -90,15 +89,13 @@ func doProcess() {
 		}
 	}
 
-	// Process
-	// CLI uses NativePipeline with deck binaries
-	p, err := pipeline.NewNativePipeline("")
-	if err != nil {
-		outputError(fmt.Sprintf("Failed to initialize pipeline: %v", err))
-		os.Exit(1)
+	// Process with working directory for import resolution
+	var result *pipeline.Result
+	if workDir != "" {
+		result, err = p.ProcessWithWorkDir(context.Background(), source, pipeline.FormatSVG, workDir)
+	} else {
+		result, err = p.Process(context.Background(), source, pipeline.FormatSVG)
 	}
-
-	result, err := p.Process(context.Background(), source, pipeline.FormatSVG)
 	if err != nil {
 		outputError(err.Error())
 		os.Exit(1)
