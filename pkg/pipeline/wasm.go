@@ -1,14 +1,11 @@
-// Package processor provides decksh → SVG conversion for WASM
-// Based on github.com/ajstarks/deck/cmd/svgdeck
-//
-// DEPRECATED: This package is deprecated in favor of pkg/pipeline.
-// Use pipeline.NewWASMPipeline() for WASM environments or
-// pipeline.NewNativePipeline() for native environments.
-// This package will be removed in a future version.
-package processor
+//go:build js || tinygo
+
+// Package pipeline provides WASM-compatible pipeline implementation
+package pipeline
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -30,52 +27,64 @@ const (
 	fillfmt      = "fill:%s;fill-opacity:%.2f"
 )
 
-// Config holds rendering configuration
-type Config struct {
-	Width  int
-	Height int
-	// Font settings (for SVG, these are CSS font-family values)
-	SansFont  string
-	SerifFont string
-	MonoFont  string
+// WASMPipeline implements Pipeline for WASM environments (Cloudflare Workers, Browser)
+// It uses ajstarks' packages directly for in-memory processing
+// Only supports SVG output (no PNG/PDF due to font requirements)
+type WASMPipeline struct {
+	width     int
+	height    int
+	sansFont  string
+	serifFont string
+	monoFont  string
+	fontmap   map[string]string
 }
 
-// fontmap maps generic font names to specific implementation names
-var fontmap = map[string]string{}
-
-// DefaultConfig returns sensible defaults
-func DefaultConfig() Config {
-	return Config{
-		Width:     1920,
-		Height:    1080,
-		SansFont:  "Helvetica, Arial, sans-serif",
-		SerifFont: "Georgia, Times, serif",
-		MonoFont:  "Monaco, Consolas, monospace",
+// NewWASMPipeline creates a new WASM pipeline with default settings
+func NewWASMPipeline() *WASMPipeline {
+	return &WASMPipeline{
+		width:     1920,
+		height:    1080,
+		sansFont:  "Helvetica, Arial, sans-serif",
+		serifFont: "Georgia, Times, serif",
+		monoFont:  "Monaco, Consolas, monospace",
+		fontmap:   make(map[string]string),
 	}
 }
 
-// Result holds the output of processing
-type Result struct {
-	Slides     [][]byte // Each slide as SVG
-	SlideCount int
-	Title      string
+// WithDimensions sets custom canvas dimensions
+func (p *WASMPipeline) WithDimensions(width, height int) *WASMPipeline {
+	p.width = width
+	p.height = height
+	return p
 }
 
-// ProcessDeckSH takes decksh source and returns SVG slides
-func ProcessDeckSH(input []byte, cfg Config) (*Result, error) {
+// WithFonts sets custom font families
+func (p *WASMPipeline) WithFonts(sans, serif, mono string) *WASMPipeline {
+	p.sansFont = sans
+	p.serifFont = serif
+	p.monoFont = mono
+	return p
+}
+
+// Process implements Pipeline.Process
+func (p *WASMPipeline) Process(ctx context.Context, source []byte, format OutputFormat) (*Result, error) {
+	if format != FormatSVG {
+		return nil, fmt.Errorf("unsupported format %s: WASM pipeline only supports SVG", format)
+	}
+
 	// Initialize font map
-	fontmap["sans"] = cfg.SansFont
-	fontmap["serif"] = cfg.SerifFont
-	fontmap["mono"] = cfg.MonoFont
+	p.fontmap["sans"] = p.sansFont
+	p.fontmap["serif"] = p.serifFont
+	p.fontmap["mono"] = p.monoFont
 
 	// Step 1: decksh → deck XML
 	var deckXML bytes.Buffer
-	if err := decksh.Process(&deckXML, bytes.NewReader(input)); err != nil {
+	if err := decksh.Process(&deckXML, bytes.NewReader(source)); err != nil {
 		return nil, fmt.Errorf("decksh processing failed: %w", err)
 	}
 
 	// Step 2: Parse deck XML
-	d, err := parseDeck(deckXML.Bytes(), cfg.Width, cfg.Height)
+	d, err := p.parseDeck(deckXML.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("deck parsing failed: %w", err)
 	}
@@ -85,6 +94,7 @@ func ProcessDeckSH(input []byte, cfg Config) (*Result, error) {
 		Slides:     make([][]byte, len(d.Slide)),
 		SlideCount: len(d.Slide),
 		Title:      d.Title,
+		Format:     FormatSVG,
 	}
 
 	cw := float64(d.Canvas.Width)
@@ -93,15 +103,20 @@ func ProcessDeckSH(input []byte, cfg Config) (*Result, error) {
 	for i := range d.Slide {
 		var svgBuf bytes.Buffer
 		doc := svg.New(&svgBuf)
-		svgslide(doc, d, i, cw, ch)
+		p.svgslide(doc, d, i, cw, ch)
 		result.Slides[i] = svgBuf.Bytes()
 	}
 
 	return result, nil
 }
 
+// SupportedFormats implements Pipeline.SupportedFormats
+func (p *WASMPipeline) SupportedFormats() []OutputFormat {
+	return []OutputFormat{FormatSVG}
+}
+
 // parseDeck parses deck XML into structure
-func parseDeck(xmlData []byte, width, height int) (*deck.Deck, error) {
+func (p *WASMPipeline) parseDeck(xmlData []byte) (*deck.Deck, error) {
 	var d deck.Deck
 	if err := xml.Unmarshal(xmlData, &d); err != nil {
 		return nil, err
@@ -109,41 +124,34 @@ func parseDeck(xmlData []byte, width, height int) (*deck.Deck, error) {
 
 	// Set canvas dimensions if not specified
 	if d.Canvas.Width == 0 {
-		d.Canvas.Width = width
+		d.Canvas.Width = p.width
 	}
 	if d.Canvas.Height == 0 {
-		d.Canvas.Height = height
+		d.Canvas.Height = p.height
 	}
 
 	return &d, nil
 }
 
-// pct converts percentages to canvas measures
+// Helper functions (unchanged from processor)
 func pct(p float64, m float64) float64 {
 	return ((p / 100.0) * m)
 }
 
-// radians converts degrees to radians
 func radians(deg float64) float64 {
 	return (deg * math.Pi) / 180.0
 }
 
-// polar returns the euclidian coordinates from polar coordinates
 func polar(x, y, r, angle float64) (float64, float64) {
 	px := (r * math.Cos(radians(angle))) + x
 	py := (r * math.Sin(radians(angle))) + y
 	return px, py
 }
 
-// dimen returns canvas dimensions from percentages
 func dimen(w, h float64, xp, yp, sp float64) (float64, float64, float64) {
 	return pct(xp, w), pct(100-yp, h), pct(sp, w)
 }
 
-// setop sets the alpha value:
-// 0 == default value (opaque)
-// -1 == fully transparent
-// > 0 set opacity percent
 func setop(v float64) float64 {
 	switch {
 	case v < 0:
@@ -156,27 +164,22 @@ func setop(v float64) float64 {
 	return v
 }
 
-// whitespace determines if a rune is whitespace
 func whitespace(r rune) bool {
 	return r == ' ' || r == '\n' || r == '\t'
 }
 
-// fontlookup maps font aliases to implementation font names
-func fontlookup(s string) string {
-	font, ok := fontmap[s]
+func (p *WASMPipeline) fontlookup(s string) string {
+	font, ok := p.fontmap[s]
 	if ok {
 		return font
 	}
-	return fontmap["sans"]
+	return p.fontmap["sans"]
 }
 
-// colorNumbers returns a list of numbers from a comma separated list,
-// in the form of xxx(n1, n2, n3), after removing tabs and spaces.
 func colorNumbers(s string) []string {
 	return strings.Split(strings.NewReplacer(" ", "", "\t", "").Replace(s[4:len(s)-1]), ",")
 }
 
-// hsv2rgb converts hsv(h (0-360), s (0-100), v (0-100)) to rgb
 func hsv2rgb(h, s, v float64) (int, int, int) {
 	s /= 100
 	v /= 100
@@ -212,7 +215,6 @@ func hsv2rgb(h, s, v float64) (int, int, int) {
 	return int(r * 255), int(g * 255), int(b * 255)
 }
 
-// h2r converts hsv to rgb colors
 func h2r(s string) string {
 	var red, green, blue int
 	v := colorNumbers(s)
@@ -225,8 +227,6 @@ func h2r(s string) string {
 	return fmt.Sprintf("rgb(%d,%d,%d)", red, green, blue)
 }
 
-// svgcolor returns a color spec;
-// if hsv, convert to rgb, otherwise pass unchanged
 func svgcolor(color string) string {
 	if strings.HasPrefix(color, "hsv(") && strings.HasSuffix(color, ")") && len(color) > 5 {
 		color = h2r(color)
@@ -234,33 +234,27 @@ func svgcolor(color string) string {
 	return color
 }
 
-// strokeop stroke a color at the specified opacity
 func strokeop(sw float64, color string, opacity float64) string {
 	return fmt.Sprintf(strokefmt, sw, svgcolor(color), setop(opacity))
 }
 
-// fillop fills with the specified color and opacity
 func fillop(color string, opacity float64) string {
 	return fmt.Sprintf(fillfmt, svgcolor(color), setop(opacity))
 }
 
-// bullet draws a bullet
 func bullet(doc *svg.SVG, x, y, size float64, color string) {
 	rs := size / 2
 	doc.Circle(x-size, y-(rs*2)/3, rs/2, "fill:"+svgcolor(color))
 }
 
-// background places a colored rectangle
 func background(doc *svg.SVG, w, h float64, color string) {
 	dorect(doc, 0, 0, w, h, svgcolor(color), 0)
 }
 
-// doline draws a line
 func doline(doc *svg.SVG, xp1, yp1, xp2, yp2, sw float64, color string, opacity float64) {
 	doc.Line(xp1, yp1, xp2, yp2, strokeop(sw, color, opacity))
 }
 
-// doarc draws an arc
 func doarc(doc *svg.SVG, x, y, w, h, a1, a2, sw float64, color string, opacity float64) {
 	sx, sy := polar(x, y, w, -a1)
 	ex, ey := polar(x, y, h, -a2)
@@ -268,22 +262,18 @@ func doarc(doc *svg.SVG, x, y, w, h, a1, a2, sw float64, color string, opacity f
 	doc.Arc(sx, sy, w, h, 0, large, false, ex, ey, "fill:none;"+strokeop(sw, color, opacity))
 }
 
-// docurve draws a bezier curve
 func docurve(doc *svg.SVG, xp1, yp1, xp2, yp2, xp3, yp3, sw float64, color string, opacity float64) {
 	doc.Qbez(xp1, yp1, xp2, yp2, xp3, yp3, "fill:none;"+strokeop(sw, color, opacity))
 }
 
-// dorect draws a rectangle
 func dorect(doc *svg.SVG, x, y, w, h float64, color string, opacity float64) {
 	doc.Rect(x, y, w, h, fillop(color, opacity))
 }
 
-// doellipse draws an ellipse
 func doellipse(doc *svg.SVG, x, y, w, h float64, color string, opacity float64) {
 	doc.Ellipse(x, y, w, h, fillop(color, opacity))
 }
 
-// dopoly draws a polygon
 func dopoly(doc *svg.SVG, xc, yc string, cw, ch float64, color string, opacity float64) {
 	xs := strings.Split(xc, " ")
 	ys := strings.Split(yc, " ")
@@ -312,7 +302,6 @@ func dopoly(doc *svg.SVG, xc, yc string, cw, ch float64, color string, opacity f
 	doc.Polygon(px, py, fillop(color, opacity))
 }
 
-// textalign returns the SVG text alignment operator
 func textalign(s string) string {
 	switch s {
 	case "center", "middle", "mid", "c":
@@ -325,13 +314,11 @@ func textalign(s string) string {
 	return "start"
 }
 
-// showtext places fully attributed text at the specified location
-func showtext(doc *svg.SVG, x, y float64, s string, fs float64, font, color, align string) {
-	doc.Text(x, y, s, `xml:space="preserve"`, fmt.Sprintf("fill:%s;font-size:%.2fpx;font-family:%s;text-anchor:%s", svgcolor(color), fs, fontlookup(font), textalign(align)))
+func (p *WASMPipeline) showtext(doc *svg.SVG, x, y float64, s string, fs float64, font, color, align string) {
+	doc.Text(x, y, s, `xml:space="preserve"`, fmt.Sprintf("fill:%s;font-size:%.2fpx;font-family:%s;text-anchor:%s", svgcolor(color), fs, p.fontlookup(font), textalign(align)))
 }
 
-// dotext places text elements on the canvas according to type
-func dotext(doc *svg.SVG, cw, x, y, fs, wp, rotation, ls float64, tdata, font, align, ttype, color string, opacity float64) {
+func (p *WASMPipeline) dotext(doc *svg.SVG, cw, x, y, fs, wp, rotation, ls float64, tdata, font, align, ttype, color string, opacity float64) {
 	ls *= fs
 	td := strings.Split(tdata, "\n")
 	if rotation > 0 {
@@ -350,10 +337,10 @@ func dotext(doc *svg.SVG, cw, x, y, fs, wp, rotation, ls float64, tdata, font, a
 		} else {
 			tw = (cw * (wp / 100.0))
 		}
-		textwrap(doc, x, y, tw, fs, ls, tdata, font, color, opacity)
+		p.textwrap(doc, x, y, tw, fs, ls, tdata, font, color, opacity)
 	} else {
 		for _, t := range td {
-			showtext(doc, x, y, t, fs, font, color, align)
+			p.showtext(doc, x, y, t, fs, font, color, align)
 			y += ls
 		}
 	}
@@ -362,9 +349,8 @@ func dotext(doc *svg.SVG, cw, x, y, fs, wp, rotation, ls float64, tdata, font, a
 	}
 }
 
-// textwrap draws text at location, wrapping at the specified width
-func textwrap(doc *svg.SVG, x, y, w, fs float64, leading float64, s, font, color string, opacity float64) {
-	doc.Gstyle(fmt.Sprintf("fill-opacity:%.2f;fill:%s;font-family:%s;font-size:%.2fpx", setop(opacity), svgcolor(color), fontlookup(font), fs))
+func (p *WASMPipeline) textwrap(doc *svg.SVG, x, y, w, fs float64, leading float64, s, font, color string, opacity float64) {
+	doc.Gstyle(fmt.Sprintf("fill-opacity:%.2f;fill:%s;font-family:%s;font-size:%.2fpx", setop(opacity), svgcolor(color), p.fontlookup(font), fs))
 	words := strings.FieldsFunc(s, whitespace)
 	xp := x
 	yp := y
@@ -387,12 +373,11 @@ func textwrap(doc *svg.SVG, x, y, w, fs float64, leading float64, s, font, color
 	doc.Gend()
 }
 
-// dolist places lists on the canvas
-func dolist(doc *svg.SVG, x, y, fs, rotation, lwidth, spacing float64, tlist []deck.ListItem, font, ltype, align, color string, opacity float64) {
+func (p *WASMPipeline) dolist(doc *svg.SVG, x, y, fs, rotation, lwidth, spacing float64, tlist []deck.ListItem, font, ltype, align, color string, opacity float64) {
 	if font == "" {
 		font = "sans"
 	}
-	doc.Gstyle(fmt.Sprintf("fill-opacity:%.2f;fill:%s;font-family:%s;font-size:%.2fpx", setop(opacity), svgcolor(color), fontlookup(font), fs))
+	doc.Gstyle(fmt.Sprintf("fill-opacity:%.2f;fill:%s;font-family:%s;font-size:%.2fpx", setop(opacity), svgcolor(color), p.fontlookup(font), fs))
 	if ltype == "bullet" {
 		x += fs
 	}
@@ -427,8 +412,7 @@ func dolist(doc *svg.SVG, x, y, fs, rotation, lwidth, spacing float64, tlist []d
 	doc.Gend()
 }
 
-// svgslide makes one slide per SVG page
-func svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
+func (p *WASMPipeline) svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
 	if n < 0 || n > len(d.Slide)-1 {
 		return
 	}
@@ -471,7 +455,6 @@ func svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
 					iw *= (im.Scale / 100)
 					ih *= (im.Scale / 100)
 				}
-				// scale the image to fit the canvas width
 				if im.Autoscale == "on" && iw < cw {
 					ih = (cw / iw) * ih
 					iw = cw
@@ -491,7 +474,7 @@ func svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
 					if im.Align == "" {
 						im.Align = "center"
 					}
-					showtext(doc, x, y+midy+(capsize*2), im.Caption, capsize, im.Font, im.Color, im.Align)
+					p.showtext(doc, x, y+midy+(capsize*2), im.Caption, capsize, im.Font, im.Color, im.Align)
 				}
 			}
 
@@ -518,7 +501,7 @@ func svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
 				w = pct(ellipse.Wp, cw)
 				if ellipse.Hr == 0 {
 					h = pct(ellipse.Hp, ch)
-				} else {
+					} else {
 					h = pct(ellipse.Hr, w)
 				}
 				if ellipse.Color == "" {
@@ -586,7 +569,7 @@ func svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
 					t.Font = "sans"
 				}
 				if t.File != "" {
-					tdata = t.File // Note: file reading not supported in WASM
+					tdata = t.File
 				} else {
 					tdata = t.Tdata
 				}
@@ -594,7 +577,7 @@ func svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
 					t.Lp = linespacing
 				}
 				x, y, fs = dimen(cw, ch, t.Xp, t.Yp, t.Sp)
-				dotext(doc, cw, x, y, fs, t.Wp, t.Rotation, t.Lp, tdata, t.Font, t.Align, t.Type, t.Color, t.Opacity)
+				p.dotext(doc, cw, x, y, fs, t.Wp, t.Rotation, t.Lp, tdata, t.Font, t.Align, t.Type, t.Color, t.Opacity)
 			}
 
 		case "list":
@@ -609,7 +592,7 @@ func svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
 					l.Wp = listwrap
 				}
 				x, y, fs = dimen(cw, ch, l.Xp, l.Yp, l.Sp)
-				dolist(doc, x, y, fs, l.Wp, l.Rotation, l.Lp, l.Li, l.Font, l.Type, l.Align, l.Color, l.Opacity)
+				p.dolist(doc, x, y, fs, l.Wp, l.Rotation, l.Lp, l.Li, l.Font, l.Type, l.Align, l.Color, l.Opacity)
 			}
 		}
 	}
@@ -617,39 +600,8 @@ func svgslide(doc *svg.SVG, d *deck.Deck, n int, cw, ch float64) {
 	doc.End()
 }
 
-// ProcessDeckXML takes deck XML and returns SVG slides (alternative entry point)
-func ProcessDeckXML(xmlData []byte, cfg Config) (*Result, error) {
-	// Initialize font map
-	fontmap["sans"] = cfg.SansFont
-	fontmap["serif"] = cfg.SerifFont
-	fontmap["mono"] = cfg.MonoFont
-
-	d, err := parseDeck(xmlData, cfg.Width, cfg.Height)
-	if err != nil {
-		return nil, fmt.Errorf("deck parsing failed: %w", err)
-	}
-
-	result := &Result{
-		Slides:     make([][]byte, len(d.Slide)),
-		SlideCount: len(d.Slide),
-		Title:      d.Title,
-	}
-
-	cw := float64(d.Canvas.Width)
-	ch := float64(d.Canvas.Height)
-
-	for i := range d.Slide {
-		var svgBuf bytes.Buffer
-		doc := svg.New(&svgBuf)
-		svgslide(doc, d, i, cw, ch)
-		result.Slides[i] = svgBuf.Bytes()
-	}
-
-	return result, nil
-}
-
-// RenderSlide renders a single slide to a writer
-func RenderSlide(w io.Writer, d *deck.Deck, slideIndex int) error {
+// RenderSlide renders a single slide to a writer (legacy compatibility)
+func (p *WASMPipeline) RenderSlide(w io.Writer, d *deck.Deck, slideIndex int) error {
 	if slideIndex < 0 || slideIndex >= len(d.Slide) {
 		return fmt.Errorf("slide index %d out of range", slideIndex)
 	}
@@ -658,6 +610,6 @@ func RenderSlide(w io.Writer, d *deck.Deck, slideIndex int) error {
 	ch := float64(d.Canvas.Height)
 
 	doc := svg.New(w)
-	svgslide(doc, d, slideIndex, cw, ch)
+	p.svgslide(doc, d, slideIndex, cw, ch)
 	return nil
 }

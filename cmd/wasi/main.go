@@ -5,12 +5,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 
-	"github.com/joeblew999/deckfs/internal/processor"
+	"github.com/joeblew999/deckfs/pkg/pipeline"
 )
 
 func main() {
@@ -51,18 +52,20 @@ func doProcess() {
 		return
 	}
 
-	// Process
-	cfg := processor.DefaultConfig()
+	// Process (WASI uses WASMPipeline)
+	p := pipeline.NewWASMPipeline()
 
 	// Check for config in env vars
+	width, height := 1920, 1080
 	if w := os.Getenv("DECKFS_WIDTH"); w != "" {
-		fmt.Sscanf(w, "%d", &cfg.Width)
+		fmt.Sscanf(w, "%d", &width)
 	}
 	if h := os.Getenv("DECKFS_HEIGHT"); h != "" {
-		fmt.Sscanf(h, "%d", &cfg.Height)
+		fmt.Sscanf(h, "%d", &height)
 	}
+	p.WithDimensions(width, height)
 
-	result, err := processor.ProcessDeckSH(source, cfg)
+	result, err := p.Process(context.Background(), source, pipeline.FormatSVG)
 	if err != nil {
 		outputError(err.Error())
 		return

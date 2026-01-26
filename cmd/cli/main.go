@@ -4,13 +4,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/joeblew999/deckfs/internal/processor"
+	"github.com/joeblew999/deckfs/pkg/pipeline"
 )
 
 func main() {
@@ -90,17 +91,14 @@ func doProcess() {
 	}
 
 	// Process
-	cfg := processor.DefaultConfig()
-
-	// Check for config in env vars
-	if w := os.Getenv("DECKFS_WIDTH"); w != "" {
-		fmt.Sscanf(w, "%d", &cfg.Width)
-	}
-	if h := os.Getenv("DECKFS_HEIGHT"); h != "" {
-		fmt.Sscanf(h, "%d", &cfg.Height)
+	// CLI uses NativePipeline with deck binaries
+	p, err := pipeline.NewNativePipeline("")
+	if err != nil {
+		outputError(fmt.Sprintf("Failed to initialize pipeline: %v", err))
+		os.Exit(1)
 	}
 
-	result, err := processor.ProcessDeckSH(source, cfg)
+	result, err := p.Process(context.Background(), source, pipeline.FormatSVG)
 	if err != nil {
 		outputError(err.Error())
 		os.Exit(1)

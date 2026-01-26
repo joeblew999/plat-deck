@@ -1,0 +1,21 @@
+version: "0.5"
+
+environment:
+  - GOWORK=off
+
+processes:
+  wazero:
+    command: task run:wazero
+    availability:
+      restart: "no"
+
+  demo:
+    command: task run:demo
+    availability:
+      restart: "no"
+
+  wrangler:
+    command: task run:wrangler
+    disabled: true
+    availability:
+      restart: "no"

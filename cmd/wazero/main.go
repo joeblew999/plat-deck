@@ -1,107 +1,62 @@
 //go:build !js
 
-// Wazero host - loads deckfs WASM from R2 and runs it
+// Host server - uses ajstarks' native tools for rendering
+// Supports SVG, PNG, PDF via piped CLI tools
 package main
 
 import (
-	"context"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"github.com/joeblew999/deckfs/pkg/pipeline"
 )
 
 func main() {
 	var (
-		wasmURL    = flag.String("wasm", "", "URL to WASM file (R2 public URL)")
-		wasmFile   = flag.String("wasm-file", "", "Local WASM file path")
-		addr       = flag.String("addr", ":8080", "Listen address")
-		r2Endpoint = flag.String("r2-endpoint", "", "R2 S3 endpoint")
-		r2Bucket   = flag.String("r2-bucket", "", "R2 bucket name")
-		r2Key      = flag.String("r2-key", "", "R2 access key")
-		r2Secret   = flag.String("r2-secret", "", "R2 secret key")
+		addr        = flag.String("addr", ":8080", "Listen address")
+		binDir      = flag.String("bin", ".bin/deck", "Directory containing deck binaries (decksh, svgdeck, etc.)")
+		examplesDir = flag.String("examples", ".src/deckviz", "Directory containing .dsh examples")
 	)
 	flag.Parse()
 
-	ctx := context.Background()
-
-	// Load WASM from R2, local file, or URL
-	var wasmBytes []byte
-	var err error
-
-	switch {
-	case *wasmFile != "":
-		log.Printf("Loading WASM from file: %s", *wasmFile)
-		wasmBytes, err = os.ReadFile(*wasmFile)
-	case *wasmURL != "":
-		log.Printf("Loading WASM from URL: %s", *wasmURL)
-		wasmBytes, err = fetchURL(*wasmURL)
-	default:
-		log.Fatal("Either -wasm or -wasm-file must be specified")
-	}
-
+	// Create native pipeline
+	pipe, err := pipeline.NewNativePipeline(*binDir)
 	if err != nil {
-		log.Fatalf("Failed to load WASM: %v", err)
+		log.Fatalf("Failed to create pipeline: %v", err)
 	}
 
-	log.Printf("WASM loaded: %d bytes", len(wasmBytes))
-
-	// Create wazero runtime
-	r := wazero.NewRuntime(ctx)
-	defer r.Close(ctx)
-
-	// Instantiate WASI
-	wasi_snapshot_preview1.MustInstantiate(ctx, r)
-
-	// TODO: Add host functions for R2 access
-	// The WASM module needs to call back to the host for storage operations
-	// This requires implementing host functions that the WASM can import
-
-	// For now, we'll run a simple HTTP proxy that handles storage on the host side
-	// and forwards processing requests to the WASM module
-
-	// Compile the module
-	compiled, err := r.CompileModule(ctx, wasmBytes)
-	if err != nil {
-		log.Fatalf("Failed to compile WASM: %v", err)
-	}
-
-	log.Printf("WASM compiled successfully")
-
-	// Create HTTP server that uses the WASM for processing
-	server := &WazeroServer{
-		runtime:    r,
-		compiled:   compiled,
-		r2Endpoint: *r2Endpoint,
-		r2Bucket:   *r2Bucket,
-		r2Key:      *r2Key,
-		r2Secret:   *r2Secret,
+	// Create HTTP server
+	server := &Server{
+		pipeline:    pipe,
+		examplesDir: *examplesDir,
 	}
 
 	log.Printf("Starting server on %s", *addr)
+	log.Printf("Binaries directory: %s", *binDir)
+	log.Printf("Supported formats: %v", pipe.SupportedFormats())
 	if err := http.ListenAndServe(*addr, server); err != nil {
 		log.Fatal(err)
 	}
 }
 
-type WazeroServer struct {
-	runtime    wazero.Runtime
-	compiled   wazero.CompiledModule
-	r2Endpoint string
-	r2Bucket   string
-	r2Key      string
-	r2Secret   string
+type Server struct {
+	pipeline    *pipeline.NativePipeline
+	examplesDir string
 }
 
-func (s *WazeroServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 	if r.Method == http.MethodOptions {
@@ -109,24 +64,52 @@ func (s *WazeroServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For /process endpoint, run WASM
-	// For storage endpoints, use R2 HTTP API directly
-
 	switch {
+	case r.URL.Path == "/":
+		// Serve demo HTML
+		s.handleDemo(w, r)
+
+	case r.URL.Path == "/api":
+		// API info
+		s.handleRoot(w, r)
+
 	case r.URL.Path == "/health":
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok","runtime":"wazero"}`))
+		w.Write([]byte(`{"status":"ok","runtime":"native"}`))
 
 	case r.URL.Path == "/process" && r.Method == "POST":
 		s.handleProcess(w, r)
 
+	case r.URL.Path == "/examples":
+		s.handleExamplesList(w, r)
+
+	case strings.HasPrefix(r.URL.Path, "/examples/"):
+		s.handleExampleContent(w, r)
+
 	default:
-		// Proxy to R2 for storage operations
-		s.proxyToR2(w, r)
+		http.NotFound(w, r)
 	}
 }
 
-func (s *WazeroServer) handleProcess(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	formats := make([]string, len(s.pipeline.SupportedFormats()))
+	for i, f := range s.pipeline.SupportedFormats() {
+		formats[i] = string(f)
+	}
+
+	info := map[string]any{
+		"service":   "deckfs",
+		"version":   "0.2.0",
+		"runtime":   "native",
+		"endpoints": []string{"/health", "/process", "/examples"},
+		"formats":   formats,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
+func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
 	// Read input
 	source, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -134,83 +117,174 @@ func (s *WazeroServer) handleProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	// Get format from query param (default: svg)
+	formatStr := r.URL.Query().Get("format")
+	if formatStr == "" {
+		formatStr = "svg"
+	}
 
-	// Create stdout writer to capture output
-	stdout := NewBytesWriter()
+	format := pipeline.OutputFormat(formatStr)
 
-	// Create a new module instance for this request
-	// Pass source via stdin, get result via stdout
-	config := wazero.NewModuleConfig().
-		WithStdin(NewBytesReader(source)).
-		WithStdout(stdout).
-		WithStderr(os.Stderr).
-		WithArgs("deckfs", "process")
-
-	mod, err := s.runtime.InstantiateModule(ctx, s.compiled, config)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("WASM execution failed: %v", err), http.StatusInternalServerError)
+	// Check if format is supported
+	supported := false
+	for _, f := range s.pipeline.SupportedFormats() {
+		if f == format {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"error":   fmt.Sprintf("unsupported format: %s", format),
+		})
 		return
 	}
-	defer mod.Close(ctx)
 
-	// Write output from stdout writer
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(stdout.Bytes())
-}
+	// Check if source path is provided (for import resolution)
+	sourcePath := r.URL.Query().Get("source")
+	var result *pipeline.Result
 
-func (s *WazeroServer) proxyToR2(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement R2 proxy
-	http.Error(w, "R2 proxy not implemented", http.StatusNotImplemented)
-}
+	if sourcePath != "" && s.examplesDir != "" {
+		// Security: prevent path traversal
+		if strings.Contains(sourcePath, "..") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   "invalid source path",
+			})
+			return
+		}
 
-func fetchURL(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+		// Get working directory from source path
+		workDir := filepath.Join(s.examplesDir, filepath.Dir(sourcePath))
+		result, err = s.pipeline.ProcessWithWorkDir(r.Context(), source, format, workDir)
+	} else {
+		// No source path, use stdin mode (no imports)
+		result, err = s.pipeline.Process(r.Context(), source, format)
+	}
+
 	if err != nil {
-		return nil, err
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	// Return result based on format
+	switch format {
+	case pipeline.FormatSVG:
+		// SVG returns slides as strings
+		slides := make([]string, len(result.Slides))
+		for i, s := range result.Slides {
+			slides[i] = string(s)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success":    true,
+			"slideCount": result.SlideCount,
+			"slides":     slides,
+			"format":     "svg",
+		})
+
+	case pipeline.FormatPNG:
+		// PNG returns slides as base64
+		slides := make([]string, len(result.Slides))
+		for i, s := range result.Slides {
+			slides[i] = base64.StdEncoding.EncodeToString(s)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success":    true,
+			"slideCount": result.SlideCount,
+			"slides":     slides,
+			"format":     "png",
+			"encoding":   "base64",
+		})
+
+	case pipeline.FormatPDF:
+		// PDF returns single document as base64
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success":    true,
+			"slideCount": result.SlideCount,
+			"document":   base64.StdEncoding.EncodeToString(result.Slides[0]),
+			"format":     "pdf",
+			"encoding":   "base64",
+		})
+	}
+}
+
+func (s *Server) handleExamplesList(w http.ResponseWriter, r *http.Request) {
+	type Example struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
 	}
 
-	return io.ReadAll(resp.Body)
-}
+	var examples []Example
 
-// BytesReader wraps []byte for stdin
-type bytesReader struct {
-	data []byte
-	pos  int
-}
+	err := filepath.WalkDir(s.examplesDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".dsh") {
+			relPath, _ := filepath.Rel(s.examplesDir, path)
+			name := strings.TrimSuffix(filepath.Base(path), ".dsh")
+			dir := filepath.Dir(relPath)
+			if dir != "." {
+				name = dir + "/" + name
+			}
+			examples = append(examples, Example{
+				Name: name,
+				Path: relPath,
+			})
+		}
+		return nil
+	})
 
-func NewBytesReader(data []byte) *bytesReader {
-	return &bytesReader{data: data}
-}
-
-func (r *bytesReader) Read(p []byte) (n int, err error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list examples: %v", err), http.StatusInternalServerError)
+		return
 	}
-	n = copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(examples)
 }
 
-// BytesWriter captures stdout
-type bytesWriter struct {
-	data []byte
+func (s *Server) handleExampleContent(w http.ResponseWriter, r *http.Request) {
+	examplePath := strings.TrimPrefix(r.URL.Path, "/examples/")
+
+	// Security: prevent path traversal
+	if strings.Contains(examplePath, "..") {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	fullPath := filepath.Join(s.examplesDir, examplePath)
+
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("File not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write(content)
 }
 
-func NewBytesWriter() *bytesWriter {
-	return &bytesWriter{}
-}
+func (s *Server) handleDemo(w http.ResponseWriter, r *http.Request) {
+	content, err := os.ReadFile("demo/index.html")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Demo not found: %v", err), http.StatusNotFound)
+		return
+	}
 
-func (w *bytesWriter) Write(p []byte) (n int, err error) {
-	w.data = append(w.data, p...)
-	return len(p), nil
-}
-
-func (w *bytesWriter) Bytes() []byte {
-	return w.data
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(content)
 }

@@ -55,15 +55,35 @@ All using **R2 as the universal filesystem** for both decksh files and WASM modu
 - Go 1.24+
 - [Task](https://taskfile.dev/)
 - [TinyGo](https://tinygo.org/) (for WASI builds)
-- [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (for Cloudflare)
+- [xplat](https://github.com/user/xplat) (for dev environment)
+- [Bun](https://bun.sh/) (for demo server)
+
+### Run Locally (Fastest)
+
+```bash
+git clone https://github.com/joeblew999/plat-deck.git
+cd plat-deck
+task util:deps
+task dev:up
+```
+
+This starts:
+- **API** at http://localhost:8080
+- **Demo UI** at http://localhost:3000
+
+Open http://localhost:3000 to try it.
+
+### Alternative: Run Services Individually
+
+```bash
+task dev:wazero   # API only on :8080
+task dev:demo     # Demo UI only on :3000
+```
 
 ### Build All Targets
 
 ```bash
-git clone https://github.com/joeblew999/deckfs.git
-cd deckfs
-go mod tidy
-task build-all
+task build:all
 ```
 
 ### Deploy to Cloudflare
@@ -74,19 +94,11 @@ cp .env.example .env
 # Edit .env with your CLOUDFLARE_API_TOKEN
 
 # Deploy
-task cf-setup          # Create R2 buckets, KV, Queue
+task cf:setup          # Create R2 buckets, KV, Queue
 # Update wrangler.toml with KV namespace ID from output
-task cf-notifications  # Enable R2 events
-task cf-deploy         # Deploy worker
-task r2-upload-wasm    # Upload WASM modules to R2
-```
-
-### Run with Wazero
-
-```bash
-task build-wasi
-task build-wazero-host
-./build/wazero/deckfs-host -wasm-file build/wasi/deckfs.wasm -addr :8080
+task cf:notifications  # Enable R2 events
+task cf:deploy         # Deploy worker
+task cf:r2-upload-wasm # Upload WASM modules to R2
 ```
 
 ### Use in Browser

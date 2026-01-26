@@ -1,0 +1,77 @@
+version: '3'
+
+tasks:
+  unit:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  imports:
+    desc: Test import resolver (WASM functionality)
+    cmds:
+      - go test -v -tags tinygo ./pkg/pipeline/ -run TestImportResolver
+      - go test -v -tags tinygo ./pkg/pipeline/ -run TestHasImports
+
+  clone:
+    desc: Clone decksh test repos
+    cmds:
+      - mkdir -p {{.SOURCE_DIR}}
+      - test -d {{.SOURCE_DIR}}/deckviz || git clone --depth 1 {{.DECKVIZ_REPO}} {{.SOURCE_DIR}}/deckviz
+      - test -d {{.SOURCE_DIR}}/decksh || git clone --depth 1 {{.DECKSH_REPO}} {{.SOURCE_DIR}}/decksh
+    status:
+      - test -d {{.SOURCE_DIR}}/deckviz
+      - test -d {{.SOURCE_DIR}}/decksh
+
+  e2e:
+    desc: End-to-end test
+    cmds:
+      - task build:cli
+      - |
+        echo 'deck
+          slide "white" "black"
+            ctext "Hello World" 50 50 5
+          eslide
+        edeck' | ./{{.BUILD_DIR}}/deckfs process > /tmp/deckfs-test.json
+      - grep -q '"success":true' /tmp/deckfs-test.json && echo "✓ E2E passed" || (echo "✗ E2E failed" && exit 1)
+
+  deckviz:
+    desc: Test with deckviz repo files
+    deps: [clone]
+    cmds:
+      - task build:cli
+      - |
+        passed=0; failed=0
+        for dsh in {{.SOURCE_DIR}}/deckviz/*/*.dsh; do
+          [ -f "$dsh" ] || continue
+          if ./{{.BUILD_DIR}}/deckfs process "$dsh" 2>/dev/null | grep -q '"success":true'; then
+            echo "✓ $dsh"; passed=$((passed + 1))
+          else
+            echo "✗ $dsh"; failed=$((failed + 1))
+          fi
+        done
+        echo "Results: $passed passed, $failed failed"
+
+  decksh:
+    desc: Test with decksh repo files
+    deps: [clone]
+    cmds:
+      - task build:cli
+      - |
+        passed=0; failed=0
+        for dsh in {{.SOURCE_DIR}}/decksh/tests/*.dsh; do
+          [ -f "$dsh" ] || continue
+          if ./{{.BUILD_DIR}}/deckfs process "$dsh" 2>/dev/null | grep -q '"success":true'; then
+            echo "✓ $dsh"; passed=$((passed + 1))
+          else
+            echo "✗ $dsh"; failed=$((failed + 1))
+          fi
+        done
+        echo "Results: $passed passed, $failed failed"
+
+  all:
+    desc: Run all tests
+    cmds:
+      - task: unit
+      - task: e2e
+      - task: decksh
+      - task: deckviz

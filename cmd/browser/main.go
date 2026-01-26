@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"syscall/js"
 
-	"github.com/joeblew999/deckfs/internal/processor"
+	"github.com/joeblew999/deckfs/pkg/pipeline"
 	"github.com/joeblew999/deckfs/runtime"
 )
 
@@ -70,20 +70,22 @@ func process(this js.Value, args []js.Value) any {
 
 	source := args[0].String()
 
-	cfg := processor.DefaultConfig()
+	p := pipeline.NewWASMPipeline()
 
 	// Parse optional config
 	if len(args) >= 2 && !args[1].IsUndefined() && !args[1].IsNull() {
 		jsConfig := args[1]
+		width, height := 1920, 1080
 		if w := jsConfig.Get("width"); !w.IsUndefined() {
-			cfg.Width = w.Int()
+			width = w.Int()
 		}
 		if h := jsConfig.Get("height"); !h.IsUndefined() {
-			cfg.Height = h.Int()
+			height = h.Int()
 		}
+		p.WithDimensions(width, height)
 	}
 
-	result, err := processor.ProcessDeckSH([]byte(source), cfg)
+	result, err := p.Process(context.Background(), []byte(source), pipeline.FormatSVG)
 	if err != nil {
 		return errorResult(err.Error())
 	}
@@ -138,8 +140,8 @@ func processFromR2(this js.Value, args []js.Value) any {
 			reader.Close()
 
 			// Process
-			cfg := processor.DefaultConfig()
-			result, err := processor.ProcessDeckSH(source, cfg)
+			p := pipeline.NewWASMPipeline()
+			result, err := p.Process(ctx, source, pipeline.FormatSVG)
 			if err != nil {
 				reject.Invoke(err.Error())
 				return

@@ -1,0 +1,26 @@
+version: '3'
+
+tasks:
+  wrangler:
+    desc: Run Cloudflare worker locally (long-running)
+    cmds:
+      - task build:cloudflare
+      - lsof -ti :{{.PORT_WRANGLER}} | xargs kill -9 2>/dev/null || true
+      - echo "Wrangler at http://localhost:{{.PORT_WRANGLER}}"
+      - bunx wrangler dev --config wrangler.toml
+
+  wazero:
+    desc: Run wazero server locally (long-running)
+    cmds:
+      - task build:wasi
+      - task build:host
+      - lsof -ti :{{.PORT_WAZERO}} | xargs kill -9 2>/dev/null || true
+      - echo "Wazero at http://localhost:{{.PORT_WAZERO}}"
+      - ./{{.BUILD_DIR}}/wazero/deckfs-host -wasm-file {{.BUILD_DIR}}/wasi/deckfs.wasm -addr :{{.PORT_WAZERO}}
+
+  demo:
+    desc: Run demo server (long-running)
+    cmds:
+      - lsof -ti :{{.PORT_DEMO}} | xargs kill -9 2>/dev/null || true
+      - echo "Demo at http://localhost:{{.PORT_DEMO}}"
+      - cd demo && bunx serve -l {{.PORT_DEMO}}

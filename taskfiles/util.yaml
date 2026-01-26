@@ -1,0 +1,39 @@
+version: '3'
+
+tasks:
+  deps:
+    desc: Install dependencies
+    cmds:
+      - go mod download && go mod tidy
+      - bun install
+
+  fmt:
+    desc: Format code
+    cmds: [go fmt ./...]
+
+  lint:
+    desc: Run linters
+    cmds:
+      - go vet ./...
+      - which golangci-lint >/dev/null && golangci-lint run || true
+
+  check:
+    desc: Format, lint, test
+    cmds:
+      - task: fmt
+      - task: lint
+      - task test:unit
+
+  clean:
+    desc: Clean everything
+    cmds:
+      - rm -rf {{.BUILD_DIR}} {{.SOURCE_DIR}} .wrangler node_modules
+      - go clean -cache
+
+  setup:
+    desc: Full setup
+    cmds:
+      - task: deps
+      - task cf:setup
+      - task build:all
+      - 'echo "Done! Update wrangler.toml with KV ID, then: task cf:deploy"'

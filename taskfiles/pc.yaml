@@ -1,0 +1,49 @@
+version: '3'
+
+tasks:
+  up:
+    desc: Start servers in background (detached)
+    cmds:
+      - task build:wasi
+      - task build:host
+      - process-compose up --port {{.PORT_PC}} -D
+      - |
+        echo "Services running:"
+        echo "  API:  http://localhost:{{.PORT_WAZERO}}"
+        echo "  Demo: http://localhost:{{.PORT_DEMO}}"
+        echo ""
+        echo "Commands:"
+        echo "  task pc:status  - show status"
+        echo "  task pc:logs    - follow logs"
+        echo "  task pc:attach  - TUI (terminal)"
+        echo "  task pc:down    - stop all"
+
+  down:
+    desc: Stop all servers
+    cmds:
+      - process-compose down --port {{.PORT_PC}}
+
+  attach:
+    desc: Attach TUI (requires terminal)
+    cmds:
+      - process-compose attach --port {{.PORT_PC}}
+
+  status:
+    desc: Show process status
+    cmds:
+      - process-compose list --port {{.PORT_PC}}
+
+  logs:
+    desc: Follow logs (PROC=wazero)
+    cmds:
+      - process-compose process logs {{.PROC | default "wazero,demo"}} --port {{.PORT_PC}} -f
+
+  tail:
+    desc: Show recent logs (PROC=wazero N=50)
+    cmds:
+      - process-compose process logs {{.PROC | default "wazero,demo"}} --port {{.PORT_PC}} -n {{.N | default "50"}}
+
+  restart:
+    desc: Restart a process (PROC=wazero)
+    cmds:
+      - process-compose process restart {{.PROC}} --port {{.PORT_PC}}

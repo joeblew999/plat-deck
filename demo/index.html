@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DeckFS Demo</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0;
@@ -16,41 +14,48 @@
             color: #eee;
             min-height: 100vh;
         }
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        h1 {
-            color: #00d4ff;
-            margin-bottom: 10px;
-        }
-        .subtitle {
-            color: #888;
-            margin-bottom: 30px;
-        }
+        .container { max-width: 1800px; margin: 0 auto; }
+        h1 { color: #00d4ff; margin-bottom: 5px; }
+        .subtitle { color: #888; margin-bottom: 20px; }
         .layout {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 2fr;
             gap: 20px;
         }
-        @media (max-width: 900px) {
-            .layout {
-                grid-template-columns: 1fr;
-            }
-        }
+        @media (max-width: 1200px) { .layout { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
         .panel {
             background: #16213e;
             border-radius: 8px;
             padding: 20px;
         }
-        .panel h2 {
-            margin-top: 0;
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .panel-header h2 {
+            margin: 0;
             color: #00d4ff;
             font-size: 1.1rem;
         }
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .toolbar select {
+            background: #0f0f23;
+            color: #eee;
+            border: 1px solid #333;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
         textarea {
             width: 100%;
-            height: 300px;
+            height: 350px;
             background: #0f0f23;
             color: #00ff88;
             border: 1px solid #333;
@@ -60,15 +65,11 @@
             font-size: 13px;
             resize: vertical;
         }
-        textarea:focus {
-            outline: none;
-            border-color: #00d4ff;
-        }
+        textarea:focus { outline: none; border-color: #00d4ff; }
         .controls {
-            margin-top: 15px;
+            margin-top: 12px;
             display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
+            gap: 12px;
             align-items: center;
         }
         button {
@@ -81,27 +82,13 @@
             font-weight: bold;
             transition: background 0.2s;
         }
-        button:hover {
-            background: #00a8cc;
-        }
-        button:disabled {
-            background: #555;
-            color: #888;
-            cursor: not-allowed;
-        }
-        .status {
-            color: #888;
-            font-size: 0.9rem;
-        }
-        .status.processing {
-            color: #ffcc00;
-        }
-        .status.success {
-            color: #00ff88;
-        }
-        .status.error {
-            color: #ff4444;
-        }
+        button:hover { background: #00a8cc; }
+        button:disabled { background: #555; color: #888; cursor: not-allowed; }
+        .hint { color: #666; font-size: 0.8rem; }
+        .status { font-size: 0.9rem; margin-left: auto; }
+        .status.processing { color: #ffcc00; }
+        .status.success { color: #00ff88; }
+        .status.error { color: #ff4444; }
         .slide-container {
             background: #fff;
             border-radius: 4px;
@@ -111,10 +98,8 @@
             align-items: center;
             justify-content: center;
         }
-        .slide-container svg {
-            width: 100%;
-            height: 100%;
-        }
+        .slide-container svg { width: 100%; height: 100%; }
+        .slide-container .placeholder { color: #888; }
         .slide-nav {
             display: flex;
             justify-content: center;
@@ -122,33 +107,33 @@
             gap: 15px;
             margin-top: 15px;
         }
-        .slide-nav button {
-            padding: 8px 16px;
-        }
-        .slide-info {
-            color: #888;
-            font-size: 0.9rem;
-        }
-        .examples {
-            margin-top: 15px;
-        }
-        .examples select {
-            background: #0f0f23;
-            color: #eee;
-            border: 1px solid #333;
-            padding: 8px 12px;
-            border-radius: 4px;
-            width: 100%;
-        }
-        .api-info {
+        .slide-nav button { padding: 8px 16px; }
+        .slide-info { color: #888; font-size: 0.9rem; min-width: 50px; text-align: center; }
+        .api-bar {
             margin-top: 20px;
-            padding: 15px;
+            padding: 12px 15px;
             background: #0f0f23;
             border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
             font-size: 0.85rem;
         }
-        .api-info code {
-            color: #00ff88;
+        .api-bar select {
+            background: #16213e;
+            color: #eee;
+            border: 1px solid #333;
+            padding: 6px 10px;
+            border-radius: 4px;
+        }
+        .api-bar code { color: #00ff88; }
+        .api-bar .spacer { flex: 1; }
+        .kbd {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.75rem;
         }
     </style>
 </head>
@@ -159,7 +144,18 @@
 
         <div class="layout">
             <div class="panel">
-                <h2>Decksh Source</h2>
+                <div class="panel-header">
+                    <h2>Decksh Source</h2>
+                    <div class="toolbar">
+                        <select id="examples">
+                            <option value="">Examples</option>
+                            <option value="simple">Simple</option>
+                            <option value="shapes">Shapes</option>
+                            <option value="list">List</option>
+                            <option value="gradient">Gradient</option>
+                        </select>
+                    </div>
+                </div>
                 <textarea id="source" placeholder="Enter decksh markup...">deck
     slide "white" "black"
         ctext "Hello DeckFS" 50 50 5
@@ -185,23 +181,20 @@
 edeck</textarea>
                 <div class="controls">
                     <button id="process">Process</button>
+                    <span class="hint"><span class="kbd">Ctrl</span>+<span class="kbd">Enter</span></span>
                     <span id="status" class="status"></span>
-                </div>
-                <div class="examples">
-                    <select id="examples">
-                        <option value="">Load example...</option>
-                        <option value="simple">Simple Slide</option>
-                        <option value="shapes">Shapes Demo</option>
-                        <option value="list">List Example</option>
-                        <option value="gradient">Gradient Background</option>
-                    </select>
                 </div>
             </div>
 
             <div class="panel">
-                <h2>Preview</h2>
+                <div class="panel-header">
+                    <h2>Preview</h2>
+                    <div class="toolbar">
+                        <span class="hint"><span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> navigate</span>
+                    </div>
+                </div>
                 <div class="slide-container" id="preview">
-                    <span style="color: #888;">Click "Process" to render slides</span>
+                    <span class="placeholder">Press Process or <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span></span>
                 </div>
                 <div class="slide-nav">
                     <button id="prev" disabled>&larr; Prev</button>
@@ -211,14 +204,16 @@ edeck</textarea>
             </div>
         </div>
 
-        <div class="api-info">
+        <div class="api-bar">
             <strong>API:</strong>
-            <select id="apiSelect" onchange="updateApiUrl()">
-                <option value="https://deckfs.gedw99.workers.dev">Production (Cloudflare)</option>
-                <option value="http://localhost:8787">Local Wrangler (:8787)</option>
-                <option value="http://localhost:8080">Local Wazero (:8080)</option>
+            <select id="apiSelect">
+                <option value="https://deckfs.gedw99.workers.dev">Production</option>
+                <option value="http://localhost:8787">Wrangler :8787</option>
+                <option value="http://localhost:8080">Wazero :8080</option>
             </select>
             <code id="apiUrl">https://deckfs.gedw99.workers.dev/process</code>
+            <span class="spacer"></span>
+            <span class="hint">Arrow keys navigate slides</span>
         </div>
     </div>
 
@@ -226,54 +221,9 @@ edeck</textarea>
         let API_BASE = 'https://deckfs.gedw99.workers.dev';
         let API_URL = API_BASE + '/process';
 
-        function updateApiUrl() {
-            API_BASE = document.getElementById('apiSelect').value;
-            API_URL = API_BASE + '/process';
-            document.getElementById('apiUrl').textContent = API_URL;
-        }
-
-        // Auto-detect localhost
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            document.getElementById('apiSelect').value = 'http://localhost:8080';
-            updateApiUrl();
-        }
-
-        const examples = {
-            simple: `deck
-    slide "white" "black"
-        ctext "Hello World" 50 50 5
-    eslide
-edeck`,
-            shapes: `deck
-    slide "white" "black"
-        ctext "Shapes" 50 15 4
-        rect 25 40 15 20 "blue"
-        square 50 40 15 "green"
-        circle 75 40 8 "red"
-        ellipse 25 70 10 5 "purple"
-        line 40 70 60 70 0.5 "orange"
-        polygon "65 65 75 75 85 65" "cyan"
-    eslide
-edeck`,
-            list: `deck
-    slide "white" "black"
-        text "Features" 10 15 3 "sans" "navy"
-        list 10 30 2 "sans" "black" 100
-            li "Easy to write"
-            li "Fast rendering"
-            li "SVG output"
-            li "Cloud native"
-            li "WASM powered"
-        elist
-    eslide
-edeck`,
-            gradient: `deck
-    slide "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" "white"
-        ctext "Gradient" 50 45 6
-        ctext "Background" 50 55 3
-    eslide
-edeck`
-        };
+        // Examples loaded dynamically from .src/deckviz
+        let examplesList = [];
+        let currentSourcePath = ''; // Track current example path for import resolution
 
         let slides = [];
         let currentSlide = 0;
@@ -286,6 +236,24 @@ edeck`
         const nextBtn = document.getElementById('next');
         const slideInfoEl = document.getElementById('slideInfo');
         const examplesEl = document.getElementById('examples');
+        const apiSelectEl = document.getElementById('apiSelect');
+
+        function updateApiUrl() {
+            API_BASE = apiSelectEl.value;
+            API_URL = API_BASE + '/process';
+            document.getElementById('apiUrl').textContent = API_URL;
+        }
+
+        // Auto-detect localhost
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            apiSelectEl.value = 'http://localhost:8080';
+            updateApiUrl();
+        }
+
+        apiSelectEl.addEventListener('change', () => {
+            updateApiUrl();
+            loadExamplesList();
+        });
 
         function setStatus(text, type = '') {
             statusEl.textContent = text;
@@ -295,9 +263,7 @@ edeck`
         function updateNav() {
             prevBtn.disabled = currentSlide <= 0;
             nextBtn.disabled = currentSlide >= slides.length - 1;
-            slideInfoEl.textContent = slides.length > 0
-                ? `${currentSlide + 1} / ${slides.length}`
-                : '-';
+            slideInfoEl.textContent = slides.length > 0 ? `${currentSlide + 1} / ${slides.length}` : '-';
         }
 
         function showSlide(index) {
@@ -311,7 +277,7 @@ edeck`
         async function process() {
             const source = sourceEl.value.trim();
             if (!source) {
-                setStatus('Please enter decksh source', 'error');
+                setStatus('Enter decksh source', 'error');
                 return;
             }
 
@@ -319,7 +285,13 @@ edeck`
             setStatus('Processing...', 'processing');
 
             try {
-                const response = await fetch(API_URL, {
+                // Add source path for import resolution if we have one
+                let url = API_URL;
+                if (currentSourcePath) {
+                    url += '?source=' + encodeURIComponent(currentSourcePath);
+                }
+
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain' },
                     body: source
@@ -331,13 +303,13 @@ edeck`
                     slides = data.slides;
                     currentSlide = 0;
                     showSlide(0);
-                    setStatus(`Rendered ${data.slideCount} slide(s)`, 'success');
+                    setStatus(`${data.slideCount} slide${data.slideCount > 1 ? 's' : ''}`, 'success');
                 } else {
-                    setStatus(data.error || 'Processing failed', 'error');
-                    previewEl.innerHTML = '<span style="color: #888;">Error rendering slides</span>';
+                    setStatus(data.error || 'Failed', 'error');
+                    previewEl.innerHTML = '<span class="placeholder">Error rendering</span>';
                 }
             } catch (err) {
-                setStatus('Network error: ' + err.message, 'error');
+                setStatus('Network error', 'error');
             } finally {
                 processBtn.disabled = false;
             }
@@ -347,20 +319,59 @@ edeck`
         prevBtn.addEventListener('click', () => showSlide(currentSlide - 1));
         nextBtn.addEventListener('click', () => showSlide(currentSlide + 1));
 
-        examplesEl.addEventListener('change', (e) => {
-            if (examples[e.target.value]) {
-                sourceEl.value = examples[e.target.value];
-                examplesEl.value = '';
+        // Clear source path when user manually edits
+        sourceEl.addEventListener('input', () => {
+            currentSourcePath = '';
+        });
+
+        // Load examples list from API
+        async function loadExamplesList() {
+            try {
+                const response = await fetch(API_BASE + '/examples');
+                examplesList = await response.json();
+
+                // Populate dropdown
+                examplesEl.innerHTML = '<option value="">Examples (' + examplesList.length + ')</option>';
+                examplesList.forEach(ex => {
+                    const opt = document.createElement('option');
+                    opt.value = ex.path;
+                    opt.textContent = ex.name;
+                    examplesEl.appendChild(opt);
+                });
+            } catch (err) {
+                console.error('Failed to load examples:', err);
+                examplesEl.innerHTML = '<option value="">Examples (offline)</option>';
+            }
+        }
+
+        // Auto-process on example selection
+        examplesEl.addEventListener('change', async (e) => {
+            if (e.target.value) {
+                try {
+                    const response = await fetch(API_BASE + '/examples/' + e.target.value);
+                    const content = await response.text();
+                    sourceEl.value = content;
+                    currentSourcePath = e.target.value; // Track source path for imports
+                    examplesEl.value = '';
+                    process();
+                } catch (err) {
+                    setStatus('Failed to load example', 'error');
+                }
             }
         });
 
-        // Keyboard navigation
+        // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowLeft') showSlide(currentSlide - 1);
             if (e.key === 'ArrowRight') showSlide(currentSlide + 1);
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                process();
+            }
         });
 
         updateNav();
+        loadExamplesList();
     </script>
 </body>
 </html>

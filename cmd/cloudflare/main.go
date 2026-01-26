@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 	"time"
 
 	"github.com/joeblew999/deckfs/handler"
-	"github.com/joeblew999/deckfs/internal/processor"
+	"github.com/joeblew999/deckfs/pkg/pipeline"
 	"github.com/joeblew999/deckfs/runtime"
 	"github.com/syumai/workers"
 	"github.com/syumai/workers/cloudflare/queues"
@@ -83,9 +84,29 @@ func consumeQueue(batch *queues.MessageBatch) error {
 		source, _ := io.ReadAll(reader)
 		reader.Close()
 
+		// Check if source has imports and expand them
+		processSource := source
+		if pipeline.HasImports(source) {
+			// Create import resolver with R2 input storage
+			resolver := pipeline.NewImportResolver(
+				pipeline.StorageLoader(runtime.Input()),
+				"", // R2 keys are already absolute-like
+			)
+
+			// Expand imports
+			ctx := context.Background()
+			expanded, err := resolver.Expand(ctx, source, key)
+			if err != nil {
+				setStatus(key, "error", "import resolution failed: "+err.Error())
+				msg.Ack() // Don't retry import errors
+				continue
+			}
+			processSource = expanded
+		}
+
 		// Process
-		cfg := processor.DefaultConfig()
-		result, err := processor.ProcessDeckSH(source, cfg)
+		p := pipeline.NewWASMPipeline()
+		result, err := p.Process(context.Background(), processSource, pipeline.FormatSVG)
 		if err != nil {
 			setStatus(key, "error", err.Error())
 			msg.Ack() // Don't retry bad source

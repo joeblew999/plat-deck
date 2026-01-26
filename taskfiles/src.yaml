@@ -1,0 +1,122 @@
+version: '3'
+
+tasks:
+  clone:
+    desc: Clone all ajstarks repos
+    cmds:
+      - mkdir -p {{.ROOT_DIR}}/{{.SOURCE_DIR}}
+      - task src:clone-deck
+      - task src:clone-decksh
+      - task src:clone-deckviz
+      - task src:clone-dchart
+      - task src:clone-deckfonts
+
+  clone-deck:
+    desc: Clone deck repo (core package)
+    status:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deck
+    cmds:
+      - git clone {{.DECK_REPO}} {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deck
+
+  clone-decksh:
+    desc: Clone decksh repo (DSL)
+    status:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/decksh
+    cmds:
+      - git clone {{.DECKSH_REPO}} {{.ROOT_DIR}}/{{.SOURCE_DIR}}/decksh
+
+  clone-deckviz:
+    desc: Clone deckviz repo (examples)
+    status:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckviz
+    cmds:
+      - git clone {{.DECKVIZ_REPO}} {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckviz
+
+  clone-dchart:
+    desc: Clone dchart repo (charts)
+    status:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/dchart
+    cmds:
+      - git clone {{.DCHART_REPO}} {{.ROOT_DIR}}/{{.SOURCE_DIR}}/dchart
+
+  clone-deckfonts:
+    desc: Clone deckfonts repo (fonts)
+    status:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckfonts
+    cmds:
+      - git clone {{.DECKFONTS_REPO}} {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckfonts
+
+  update:
+    desc: Update all repos (skips missing)
+    cmds:
+      - task src:update-deck || true
+      - task src:update-decksh || true
+      - task src:update-deckviz || true
+      - task src:update-dchart || true
+      - task src:update-deckfonts || true
+
+  update-deck:
+    desc: Update deck repo
+    dir: "{{.ROOT_DIR}}/{{.SOURCE_DIR}}/deck"
+    preconditions:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deck
+    cmds:
+      - git pull
+
+  update-decksh:
+    desc: Update decksh repo
+    dir: "{{.ROOT_DIR}}/{{.SOURCE_DIR}}/decksh"
+    preconditions:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/decksh
+    cmds:
+      - git pull
+
+  update-deckviz:
+    desc: Update deckviz repo
+    dir: "{{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckviz"
+    preconditions:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckviz
+    cmds:
+      - git pull
+
+  update-dchart:
+    desc: Update dchart repo
+    dir: "{{.ROOT_DIR}}/{{.SOURCE_DIR}}/dchart"
+    preconditions:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/dchart
+    cmds:
+      - git pull
+
+  update-deckfonts:
+    desc: Update deckfonts repo
+    dir: "{{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckfonts"
+    preconditions:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckfonts
+    cmds:
+      - git pull
+
+  clean:
+    desc: Remove all repos
+    cmds:
+      - rm -rf {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deck {{.ROOT_DIR}}/{{.SOURCE_DIR}}/decksh {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckviz {{.ROOT_DIR}}/{{.SOURCE_DIR}}/dchart {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckfonts
+
+  list:
+    desc: List available .dsh examples
+    cmds:
+      - |
+        echo "=== .dsh files ==="
+        echo "deckviz: $(find {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deckviz -name '*.dsh' 2>/dev/null | wc -l | tr -d ' ')"
+        echo "decksh:  $(find {{.ROOT_DIR}}/{{.SOURCE_DIR}}/decksh -name '*.dsh' 2>/dev/null | wc -l | tr -d ' ')"
+
+  status:
+    desc: Show status of repos
+    cmds:
+      - |
+        echo "=== {{.SOURCE_DIR}} ==="
+        for repo in deck decksh deckviz dchart deckfonts; do
+          if [ -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/$repo ]; then
+            echo "$repo: $(cd {{.ROOT_DIR}}/{{.SOURCE_DIR}}/$repo && git rev-parse --short HEAD) ($(cd {{.ROOT_DIR}}/{{.SOURCE_DIR}}/$repo && git log -1 --format=%cr))"
+          else
+            echo "$repo: not cloned"
+          fi
+        done

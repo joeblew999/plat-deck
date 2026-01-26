@@ -1,7 +1,10 @@
+//go:build js || tinygo || cloudflare
+
 // Package handler provides HTTP handlers that work across all runtimes
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joeblew999/deckfs/internal/processor"
+	"github.com/joeblew999/deckfs/demo"
+	"github.com/joeblew999/deckfs/pkg/pipeline"
 	"github.com/joeblew999/deckfs/runtime"
 )
 
@@ -46,6 +50,17 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	// Check if request is from browser (Accept: text/html)
+	acceptHeader := r.Header.Get("Accept")
+	if strings.Contains(acceptHeader, "text/html") {
+		// Serve demo HTML
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(demo.HTML)
+		return
+	}
+
+	// Serve API info for non-browser requests
 	writeJSON(w, map[string]any{
 		"service":   "deckfs",
 		"version":   Version,
@@ -72,16 +87,29 @@ func handleProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := processor.DefaultConfig()
+	// Expand imports if needed (WASM only)
+	sourcePath := r.URL.Query().Get("source")
+	source, err = expandImports(r.Context(), source, sourcePath)
+	if err != nil {
+		writeError(w, fmt.Sprintf("Import resolution failed: %v", err), http.StatusBadRequest)
+		return
+	}
 
+	// Create pipeline
+	p := pipeline.NewWASMPipeline()
+
+	// Parse dimensions from query params
+	width, height := 1920, 1080
 	if ws := r.URL.Query().Get("width"); ws != "" {
-		fmt.Sscanf(ws, "%d", &cfg.Width)
+		fmt.Sscanf(ws, "%d", &width)
 	}
 	if hs := r.URL.Query().Get("height"); hs != "" {
-		fmt.Sscanf(hs, "%d", &cfg.Height)
+		fmt.Sscanf(hs, "%d", &height)
 	}
+	p.WithDimensions(width, height)
 
-	result, err := processor.ProcessDeckSH(source, cfg)
+	// Process
+	result, err := p.Process(r.Context(), source, pipeline.FormatSVG)
 	if err != nil {
 		writeError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -128,9 +156,16 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Expand imports if needed (WASM only)
+	processSource, err := expandImports(ctx, source, key)
+	if err != nil {
+		writeError(w, fmt.Sprintf("Import resolution failed: %v", err), http.StatusBadRequest)
+		return
+	}
+
 	// Process
-	cfg := processor.DefaultConfig()
-	result, err := processor.ProcessDeckSH(source, cfg)
+	p := pipeline.NewWASMPipeline()
+	result, err := p.Process(ctx, processSource, pipeline.FormatSVG)
 	if err != nil {
 		writeError(w, fmt.Sprintf("Processing failed: %v", err), http.StatusBadRequest)
 		return
@@ -274,4 +309,21 @@ func makeSlideList(baseName string, count int) []map[string]any {
 		}
 	}
 	return slides
+}
+
+// expandImports pre-expands import/include statements for WASM environments
+func expandImports(ctx context.Context, source []byte, sourcePath string) ([]byte, error) {
+	// Check if source has imports and expand them
+	if !pipeline.HasImports(source) || sourcePath == "" {
+		return source, nil
+	}
+
+	// Create import resolver with R2 input storage
+	resolver := pipeline.NewImportResolver(
+		pipeline.StorageLoader(runtime.Input()),
+		"", // R2 keys are already absolute-like
+	)
+
+	// Expand imports
+	return resolver.Expand(ctx, source, sourcePath)
 }
