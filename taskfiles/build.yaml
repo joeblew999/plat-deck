@@ -57,7 +57,7 @@ tasks:
 
   tools:
     desc: Build ajstarks deck CLI binaries from .src (not the deckfs runtime)
-    deps: [tools-decksh, tools-dshfmt, tools-dshlint, tools-svgdeck, tools-pngdeck, tools-pdfdeck]
+    deps: [tools-decksh, tools-dshfmt, tools-dshlint, tools-svgdeck, tools-pngdeck, tools-pdfdeck, tools-dchart]
 
   tools-decksh:
     desc: Build decksh from .src
@@ -124,6 +124,17 @@ tasks:
       - test -f {{.ROOT_DIR}}/{{.BUILD_DIR}}/deck/pdfdeck
     preconditions:
       - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/deck
+
+  tools-dchart:
+    desc: Build dchart from .src
+    dir: "{{.ROOT_DIR}}/{{.SOURCE_DIR}}/dchart/cmd/dchart"
+    cmds:
+      - mkdir -p {{.ROOT_DIR}}/{{.BUILD_DIR}}/deck
+      - go build -o {{.ROOT_DIR}}/{{.BUILD_DIR}}/deck/dchart .
+    status:
+      - test -f {{.ROOT_DIR}}/{{.BUILD_DIR}}/deck/dchart
+    preconditions:
+      - test -d {{.ROOT_DIR}}/{{.SOURCE_DIR}}/dchart
 
   all:
     desc: Build all targets

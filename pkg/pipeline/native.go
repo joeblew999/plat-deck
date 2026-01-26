@@ -110,7 +110,16 @@ func (p *NativePipeline) ProcessWithWorkDir(ctx context.Context, source []byte, 
 
 	// For PNG and PDF, we need to generate all slides
 	// For SVG, we generate each slide separately
-	slides, err := p.renderSlides(ctx, rendererBin, xmlData, len(d.Slide), format)
+	// Pass workDir so renderers can find image assets
+	var assetDir string
+	if workDir != "" {
+		// Convert to absolute path
+		absAssetDir, err := filepath.Abs(workDir)
+		if err == nil {
+			assetDir = absAssetDir
+		}
+	}
+	slides, err := p.renderSlides(ctx, rendererBin, xmlData, len(d.Slide), format, assetDir)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +133,8 @@ func (p *NativePipeline) ProcessWithWorkDir(ctx context.Context, source []byte, 
 }
 
 // renderSlides renders all slides using the specified renderer
-func (p *NativePipeline) renderSlides(ctx context.Context, rendererBin string, xmlData []byte, slideCount int, format OutputFormat) ([][]byte, error) {
+// assetDir is the directory where image assets can be found (empty if none)
+func (p *NativePipeline) renderSlides(ctx context.Context, rendererBin string, xmlData []byte, slideCount int, format OutputFormat, assetDir string) ([][]byte, error) {
 	// Create temp directory for processing
 	tmpDir, err := os.MkdirTemp("", "deckfs-*")
 	if err != nil {
@@ -154,6 +164,9 @@ func (p *NativePipeline) renderSlides(ctx context.Context, rendererBin string, x
 	if format == FormatPDF {
 		// Generate single multi-page PDF
 		cmd := exec.CommandContext(ctx, rendererBin, "-pages", fmt.Sprintf("1-%d", slideCount), "-fontdir", absFontDir, "-outdir", tmpDir, xmlFile)
+		if assetDir != "" {
+			cmd.Dir = assetDir // Set working directory to find image assets
+		}
 		var errBuf bytes.Buffer
 		cmd.Stderr = &errBuf
 
@@ -185,6 +198,10 @@ func (p *NativePipeline) renderSlides(ctx context.Context, rendererBin string, x
 			cmd = exec.CommandContext(ctx, rendererBin, "-pages", fmt.Sprintf("%d-%d", pageNum, pageNum), "-fontdir", absFontDir, "-outdir", tmpDir, xmlFile)
 		}
 
+		if assetDir != "" {
+			cmd.Dir = assetDir // Set working directory to find image assets
+		}
+
 		var errBuf bytes.Buffer
 		cmd.Stderr = &errBuf
 
@@ -202,6 +219,10 @@ func (p *NativePipeline) renderSlides(ctx context.Context, rendererBin string, x
 		outputFile := filepath.Join(tmpDir, fmt.Sprintf("deck-%05d.%s", pageNum, ext))
 		fileData, err := os.ReadFile(outputFile)
 		if err != nil {
+			stderr := errBuf.String()
+			if stderr != "" {
+				return nil, fmt.Errorf("failed to read generated %s for slide %d: %w\nstderr: %s", format, pageNum, err, stderr)
+			}
 			return nil, fmt.Errorf("failed to read generated %s for slide %d: %w", format, pageNum, err)
 		}
 
@@ -233,6 +254,15 @@ func (p *NativePipeline) SupportedFormats() []OutputFormat {
 func (p *NativePipeline) runDeckshStdin(ctx context.Context, source []byte) ([]byte, error) {
 	deckshCmd := exec.CommandContext(ctx, p.deckshBin)
 	deckshCmd.Stdin = bytes.NewReader(source)
+
+	// Add .bin/deck to PATH for dchart and other deck tools
+	binDir := filepath.Dir(p.deckshBin)
+	if currentPath := os.Getenv("PATH"); currentPath != "" {
+		deckshCmd.Env = append(os.Environ(), fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
+	} else {
+		deckshCmd.Env = append(os.Environ(), fmt.Sprintf("PATH=%s", binDir))
+	}
+
 	var xmlBuf bytes.Buffer
 	deckshCmd.Stdout = &xmlBuf
 	var stderrBuf bytes.Buffer
@@ -257,6 +287,15 @@ func (p *NativePipeline) runDeckshFile(ctx context.Context, source []byte, workD
 	// Run decksh with the file path
 	deckshCmd := exec.CommandContext(ctx, p.deckshBin, tmpFile)
 	deckshCmd.Dir = workDir // Set working directory
+
+	// Add .bin/deck to PATH for dchart and other deck tools
+	binDir := filepath.Dir(p.deckshBin)
+	if currentPath := os.Getenv("PATH"); currentPath != "" {
+		deckshCmd.Env = append(os.Environ(), fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
+	} else {
+		deckshCmd.Env = append(os.Environ(), fmt.Sprintf("PATH=%s", binDir))
+	}
+
 	var xmlBuf bytes.Buffer
 	deckshCmd.Stdout = &xmlBuf
 	var stderrBuf bytes.Buffer
