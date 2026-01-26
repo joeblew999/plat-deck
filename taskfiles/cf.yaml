@@ -49,9 +49,7 @@ tasks:
   r2-upload-wasm:
     desc: Upload WASM builds to R2
     cmds:
-      - task build:browser build:wasi
-      - bunx wrangler r2 object put {{.CF_R2_WASM}}/browser/deckfs.wasm --file {{.BUILD_DIR}}/browser/deckfs.wasm --remote
-      - bunx wrangler r2 object put {{.CF_R2_WASM}}/browser/wasm_exec.js --file {{.BUILD_DIR}}/browser/wasm_exec.js --remote
+      - task build:wasi
       - bunx wrangler r2 object put {{.CF_R2_WASM}}/wasi/deckfs.wasm --file {{.BUILD_DIR}}/wasi/deckfs.wasm --remote
 
   r2-list:

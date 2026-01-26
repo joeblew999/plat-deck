@@ -23,23 +23,6 @@ tasks:
       - "{{.BUILD_DIR}}/cloudflare/app.wasm"
       - "{{.BUILD_DIR}}/cloudflare/worker.mjs"
 
-  browser:
-    desc: Build for browser (Go WASM)
-    cmds:
-      - mkdir -p {{.BUILD_DIR}}/browser
-      - GOOS=js GOARCH=wasm go build -o {{.BUILD_DIR}}/browser/deckfs.wasm ./cmd/browser
-      - cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" {{.BUILD_DIR}}/browser/
-    sources:
-      - cmd/browser/**/*.go
-      - handler/**/*.go
-      - runtime/**/*.go
-      - internal/**/*.go
-      - go.mod
-      - go.sum
-    generates:
-      - "{{.BUILD_DIR}}/browser/deckfs.wasm"
-      - "{{.BUILD_DIR}}/browser/wasm_exec.js"
-
   wasi:
     desc: Build WASI module (wazero, wasmtime)
     cmds:
@@ -162,6 +145,5 @@ tasks:
     cmds:
       - task: tools
       - task: cloudflare
-      - task: browser
       - task: wasi
       - task: host

@@ -23,7 +23,6 @@ cmd/cloudflare/  ← PRIMARY: Cloudflare Workers (TinyGo WASM)
 cmd/cli/         ← Testing: native binary
 cmd/wazero/      ← Alternative: standalone Go server
 cmd/wasi/        ← Alternative: WASM module for wazero
-cmd/browser/     ← Unused: browser WASM (can probably delete)
 ```
 
 ## What needs what
@@ -48,7 +47,6 @@ BUILD CHAIN:
   build:wasi       → cmd/wasi/    → .bin/wasi/deckfs.wasm (TinyGo WASM)
   build:cloudflare → cmd/cloudflare/ → .bin/cloudflare/app.wasm (TinyGo WASM)
   build:cli        → cmd/cli/     → .bin/deckfs (Go binary)
-  build:browser    → cmd/browser/ → .bin/browser/deckfs.wasm (Go WASM)
 ```
 
 ## Build outputs
