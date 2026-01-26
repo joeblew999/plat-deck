@@ -1,52 +1,27 @@
 # plat-deck
 
-Universal WASM Presentation Processing
+Cross-platform decksh presentation renderer
 
 Demo: https://deckfs.gedw99.workers.dev/
 
-Process [decksh](https://github.com/ajstarks/decksh) presentations to SVG, running the same Go code on:
+Process [decksh](https://github.com/ajstarks/decksh) presentations to **SVG, PNG, and PDF** using two deployment modes:
 
-- **Cloudflare Workers** (via syumai/workers)
-- **Wazero** (server-side WASM runtime)
-- **Browser** (standard Go WASM)
+## Deployment Modes
 
-All using **R2 as the universal filesystem** for both decksh files and WASM modules.
+### Native Pipeline (Recommended for Development)
+Uses [ajstarks' deck tools](https://github.com/ajstarks/deck) via Go server
+- ✅ **Formats**: SVG, PNG, PDF
+- ✅ **File system access** for imports/includes
+- ✅ **Font rendering** with custom TTF fonts
+- ✅ **275 example presentations** built-in
+- ✅ **Fast**: Direct binary execution
 
-## Architecture
-
-```
-                    ┌─────────────────────────────────────┐
-                    │              R2 Storage              │
-                    │  ┌─────────┐ ┌─────────┐ ┌───────┐ │
-                    │  │  Input  │ │ Output  │ │ WASM  │ │
-                    │  │  .dsh   │ │  .svg   │ │modules│ │
-                    │  └────┬────┘ └────┬────┘ └───┬───┘ │
-                    └───────┼───────────┼─────────┼──────┘
-                            │           │         │
-        ┌───────────────────┼───────────┼─────────┼────────────────────┐
-        │                   ▼           ▼         ▼                    │
-        │   ┌─────────────────────────────────────────────────────┐   │
-        │   │              deckfs WASM Module                      │   │
-        │   │   (same Go code, different build tags)               │   │
-        │   └─────────────────────────────────────────────────────┘   │
-        │                           │                                  │
-        │     ┌─────────────────────┼─────────────────────┐           │
-        │     ▼                     ▼                     ▼           │
-        │ ┌────────┐          ┌──────────┐          ┌─────────┐       │
-        │ │Cloudflare         │  Wazero  │          │ Browser │       │
-        │ │Workers │          │  Host    │          │  WASM   │       │
-        │ └────────┘          └──────────┘          └─────────┘       │
-        └─────────────────────────────────────────────────────────────┘
-```
-
-## Build Targets
-
-| Target | Build Tag | Output | Use Case |
-|--------|-----------|--------|----------|
-| `build-cloudflare` | `cloudflare` | `build/cloudflare/app.wasm` | Cloudflare Workers |
-| `build-browser` | (none) | `build/browser/deckfs.wasm` | Browser via JS |
-| `build-wasi` | `wasi` | `build/wasi/deckfs.wasm` | Wazero, wasmtime |
-| `build-wazero-host` | - | `build/wazero/deckfs-host` | Host binary |
+### WASM Pipeline (Cloudflare Workers)
+TinyGo WASM for serverless edge deployment
+- ✅ **Formats**: SVG
+- ✅ **R2 storage** for inputs/outputs
+- ✅ **Edge compute**: Sub-100ms global latency
+- ⏳ PNG/PDF support coming soon
 
 ## Quick Start
 
@@ -54,150 +29,323 @@ All using **R2 as the universal filesystem** for both decksh files and WASM modu
 
 - Go 1.24+
 - [Task](https://taskfile.dev/)
-- [TinyGo](https://tinygo.org/) (for WASI builds)
-- [xplat](https://github.com/user/xplat) (for dev environment)
+- [TinyGo](https://tinygo.org/) (for Cloudflare builds)
 - [Bun](https://bun.sh/) (for demo server)
 
-### Run Locally (Fastest)
+### 1. Clone and Setup
 
 ```bash
 git clone https://github.com/joeblew999/plat-deck.git
 cd plat-deck
-task util:deps
-task dev:up
+
+# Clone ajstarks' repos for binaries and examples
+task test:clone
+
+# Build ajstarks' binaries and wazero host
+task build:host
+task build:tools
 ```
 
-This starts:
-- **API** at http://localhost:8080
-- **Demo UI** at http://localhost:3000
-
-Open http://localhost:3000 to try it.
-
-### Alternative: Run Services Individually
+### 2. Run Native Server
 
 ```bash
-task dev:wazero   # API only on :8080
-task dev:demo     # Demo UI only on :3000
+# Option A: Everything together (recommended)
+task pc:up
+# Starts wazero (:8080) + demo (:3000)
+
+# Option B: Individual services
+task run:wazero    # API only on :8080
+task run:demo      # Demo UI only on :3000
 ```
 
-### Build All Targets
+Open http://localhost:8080 or http://localhost:3000 to try it.
+
+### 3. Run Cloudflare Worker Locally
 
 ```bash
-task build:all
+task run:wrangler
+# Starts local Cloudflare emulator on :8787
 ```
 
-### Deploy to Cloudflare
+## Output Formats
+
+All formats use ajstarks' original deck renderers:
+
+| Format | Multi-slide | Font Support | Use Case |
+|--------|-------------|--------------|----------|
+| **SVG** | Individual files | Basic | Web display, editing |
+| **PNG** | Individual images | Full TTF | Social media, thumbnails |
+| **PDF** | Single document | Full TTF | Print, distribution |
+
+## API
+
+### Native Server (localhost:8080)
 
 ```bash
-# Set up environment
-cp .env.example .env
-# Edit .env with your CLOUDFLARE_API_TOKEN
+# Health check
+curl http://localhost:8080/health
 
-# Deploy
-task cf:setup          # Create R2 buckets, KV, Queue
-# Update wrangler.toml with KV namespace ID from output
-task cf:notifications  # Enable R2 events
-task cf:deploy         # Deploy worker
-task cf:r2-upload-wasm # Upload WASM modules to R2
+# API info
+curl http://localhost:8080/api | jq
+
+# Process to SVG
+curl -X POST 'http://localhost:8080/process?format=svg' \
+  --data-binary @presentation.dsh | jq -r '.slides[0]' > slide1.svg
+
+# Process to PNG (returns base64)
+curl -X POST 'http://localhost:8080/process?format=png' \
+  --data-binary @presentation.dsh | jq -r '.slides[0]' | base64 -d > slide1.png
+
+# Process to PDF (multi-page document)
+curl -X POST 'http://localhost:8080/process?format=pdf' \
+  --data-binary @presentation.dsh | jq -r '.document' | base64 -d > deck.pdf
+
+# List examples
+curl http://localhost:8080/examples | jq
+
+# Get example content
+curl http://localhost:8080/examples/go/go.dsh
 ```
 
-### Use in Browser
+### Cloudflare Worker (localhost:8787 or production)
 
-```html
-<script src="https://pub-xxx.r2.dev/browser/wasm_exec.js"></script>
-<script>
-const go = new Go();
-WebAssembly.instantiateStreaming(
-  fetch("https://pub-xxx.r2.dev/browser/deckfs.wasm"),
-  go.importObject
-).then(result => {
-  go.run(result.instance);
-  
-  // Now use deckfs
-  const result = JSON.parse(deckfs.process(`
-    deck
-    slide
-      ctext "Hello!" 50 50 5
-    eslide
-    edeck
-  `));
-  console.log(result.slides[0]); // SVG
-});
-</script>
-```
+```bash
+# Health check
+curl https://deckfs.gedw99.workers.dev/health
 
-## R2 Bucket Structure
-
-```
-deckfs-input/          # Source .dsh files
-  presentations/
-    intro.dsh
-    
-deckfs-output/         # Generated SVGs + manifests
-  presentations/
-    intro/
-      slide-0001.svg
-      slide-0002.svg
-      manifest.json
-
-deckfs-wasm/           # WASM modules (runtime loading)
-  browser/
-    deckfs.wasm
-    wasm_exec.js
-  wasi/
-    deckfs.wasm
+# Process to SVG
+curl -X POST 'https://deckfs.gedw99.workers.dev/process' \
+  --data-binary @presentation.dsh | jq -r '.slides[0]' > slide1.svg
 ```
 
 ## Project Structure
 
 ```
-deckfs/
+plat-deck/
 ├── cmd/
-│   ├── cloudflare/    # Cloudflare Workers entry
-│   ├── browser/       # Browser WASM entry
-│   ├── wasi/          # WASI entry (stdin/stdout)
-│   └── wazero/        # Wazero host binary
+│   ├── cloudflare/    # Cloudflare Workers entry (TinyGo WASM)
+│   ├── wazero/        # Native server using ajstarks binaries
+│   ├── cli/           # CLI tool for testing
+│   ├── wasi/          # WASM module for wazero (alternative)
+│   └── browser/       # Browser WASM (experimental)
+├── pkg/
+│   └── pipeline/
+│       ├── native.go      # Uses ajstarks binaries (SVG/PNG/PDF)
+│       └── types.go       # Shared types
 ├── handler/           # Shared HTTP handlers
-├── runtime/           # Platform abstraction
-│   ├── runtime.go     # Storage interface
-│   ├── storage_cloudflare.go  # R2 via syumai/workers
-│   └── storage_http.go        # R2 via S3 HTTP API
+├── runtime/           # Platform abstraction (R2, KV, etc)
 ├── internal/
-│   └── processor/     # decksh → SVG conversion
-├── wrangler.toml
-└── Taskfile.yaml
+│   └── processor/     # decksh → XML conversion
+├── demo/
+│   └── index.html     # Interactive demo UI
+├── .bin/              # Built binaries
+│   ├── deck/          # ajstarks tools (decksh, svgdeck, pngdeck, pdfdeck)
+│   └── wazero/        # deckfs-host
+├── .src/              # Source repos and resources
+│   ├── decksh/        # ajstarks/decksh
+│   ├── deck/          # ajstarks/deck
+│   ├── deckviz/       # 275 example presentations
+│   └── deckfonts/     # TTF fonts for PNG/PDF
+└── taskfiles/         # Task definitions
 ```
 
-## API
+## Architecture
 
-All runtimes expose the same API:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/process` | POST | Process decksh, return SVG |
-| `/upload/:key` | PUT | Upload, process, store in R2 |
-| `/slides/:key` | GET | Get SVG from R2 |
-| `/manifest/:name` | GET | Get manifest |
-| `/decks` | GET | List processed decks |
-| `/status/:key` | GET | Get processing status (from KV) |
-
-## Browser Demo
-
-Open `demo/index.html` in a browser to try the API interactively.
-
-## Tasks
-
-Run `task --list` to see all available tasks:
+### Native Pipeline
 
 ```
-build-*         Build targets (cloudflare, browser, wasi, wazero-host, cli)
-cf-*            Cloudflare management (setup, deploy, list, teardown)
-r2-*            R2 storage operations (upload, upload-wasm)
-test-*          Tests (unit, e2e, decksh, deckviz)
-dev-*           Local development servers
+┌─────────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
+│  decksh     │────▶│  decksh  │────▶│ svgdeck/ │────▶│ SVG/PNG/ │
+│  source     │     │  binary  │     │ pngdeck/ │     │   PDF    │
+│  (.dsh)     │     │          │     │ pdfdeck  │     │          │
+└─────────────┘     └──────────┘     └──────────┘     └──────────┘
+                         │                 ▲
+                         │                 │
+                         └─────XML─────────┘
 ```
+
+1. **Parse**: `decksh` converts `.dsh` → deck XML
+2. **Render**: Format-specific renderer converts XML → output
+   - `svgdeck`: Individual SVG files per slide
+   - `pngdeck`: Individual PNG images per slide (with fonts)
+   - `pdfdeck`: Single multi-page PDF document (with fonts)
+
+### WASM Pipeline
+
+```
+┌─────────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
+│  R2 Input   │────▶│Cloudflare│────▶│   SVG    │────▶│ R2 Output│
+│   (.dsh)    │     │  Worker  │     │ renderer │     │  (.svg)  │
+└─────────────┘     └──────────┘     └──────────┘     └──────────┘
+```
+
+## Available Tasks
+
+Run `task --list` to see all tasks. Key tasks:
+
+```bash
+# Development
+task pc:up              # Start all services (wazero + demo)
+task run:wrangler       # Cloudflare worker locally (:8787)
+task run:wazero         # Wazero server locally (:8080)
+task run:demo           # Demo server only (:3000)
+
+# Building
+task build:host         # Build wazero host binary
+task build:tools        # Build ajstarks binaries (decksh, svgdeck, etc)
+task build:cloudflare   # Build Cloudflare worker WASM
+task build:cli          # Build CLI tool
+
+# Testing
+task test:unit          # Run Go tests
+task test:e2e           # End-to-end tests
+task test:decksh        # Test against decksh examples
+task test:deckviz       # Test against deckviz examples
+
+# Deployment
+task cf:deploy          # Deploy to Cloudflare Workers
+task cf:setup           # Create R2 buckets, KV, Queue
+task cf:teardown        # Remove Cloudflare resources
+
+# Setup
+task test:clone         # Clone ajstarks repos
+```
+
+## Environment Variables
+
+### Native Server
+
+- `DECKFONTS` - Path to font directory (default: `.src/deckfonts`)
+  - Required for PNG/PDF rendering with custom fonts
+  - Should contain TTF files (SansSerif, Serif, Mono variants)
+
+## Deployment
+
+### Deploy to Cloudflare Workers
+
+```bash
+# 1. Set up environment
+cp .env.example .env
+# Edit .env with your CLOUDFLARE_API_TOKEN
+
+# 2. Create resources
+task cf:setup
+# Update wrangler.toml with KV namespace ID from output
+
+# 3. Deploy
+task cf:deploy
+
+# 4. Test
+curl https://deckfs.YOUR-SUBDOMAIN.workers.dev/health
+```
+
+### Deploy Native Server
+
+Build and run anywhere Go runs:
+
+```bash
+# Build
+task build:host
+task build:tools
+
+# Run
+DECKFONTS=.src/deckfonts \
+  .bin/wazero/deckfs-host \
+  -addr :8080 \
+  -bin .bin/deck \
+  -examples .src/deckviz
+```
+
+## Examples
+
+### Basic Presentation
+
+```bash
+cat > hello.dsh << 'EOF'
+deck
+  slide "white" "black"
+    ctext "Hello, World!" 50 50 5
+  eslide
+  slide "lightblue" "navy"
+    text "Bullet 1" 20 40 3
+    text "Bullet 2" 20 50 3
+    text "Bullet 3" 20 60 3
+  eslide
+edeck
+EOF
+
+# Generate SVG
+curl -X POST 'http://localhost:8080/process?format=svg' \
+  --data-binary @hello.dsh | jq -r '.slides[0]' > slide1.svg
+
+# Generate PNG
+curl -X POST 'http://localhost:8080/process?format=png' \
+  --data-binary @hello.dsh | jq -r '.slides[0]' | base64 -d > slide1.png
+
+# Generate PDF (all slides in one document)
+curl -X POST 'http://localhost:8080/process?format=pdf' \
+  --data-binary @hello.dsh | jq -r '.document' | base64 -d > hello.pdf
+```
+
+### With Custom Fonts
+
+```bash
+cat > fonts.dsh << 'EOF'
+deck
+  slide "white" "black"
+    text "Sans Serif Font" 10 30 3 "sans"
+    text "Serif Font" 10 50 3 "serif"
+    text "Monospace Font" 10 70 3 "mono"
+  eslide
+edeck
+EOF
+
+# Fonts are automatically used for PNG/PDF
+curl -X POST 'http://localhost:8080/process?format=png' \
+  --data-binary @fonts.dsh | jq -r '.slides[0]' | base64 -d > fonts.png
+```
+
+### Using Imports
+
+```bash
+# Create reusable definitions
+cat > defs.dsh << 'EOF'
+def companylogo
+  image "logo.png" 90 5 128 128
+edef
+EOF
+
+# Use in presentation
+cat > main.dsh << 'EOF'
+include "defs.dsh"
+
+deck
+  slide "white" "black"
+    companylogo
+    ctext "Company Presentation" 50 50 5
+  eslide
+edeck
+EOF
+
+# Process with working directory for import resolution
+curl -X POST 'http://localhost:8080/process?format=svg&source=main.dsh' \
+  --data-binary @main.dsh | jq -r '.slides[0]' > slide1.svg
+```
+
+## Contributing
+
+1. Fork the repo
+2. Create a feature branch
+3. Make your changes
+4. Run tests: `task test:unit test:e2e`
+5. Submit a pull request
 
 ## License
 
 MIT
+
+## Credits
+
+- [ajstarks/decksh](https://github.com/ajstarks/decksh) - Original decksh implementation
+- [ajstarks/deck](https://github.com/ajstarks/deck) - SVG/PNG/PDF renderers
+- [syumai/workers](https://github.com/syumai/workers) - Cloudflare Workers Go runtime
