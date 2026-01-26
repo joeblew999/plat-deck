@@ -102,10 +102,47 @@ curl -X POST 'http://localhost:8080/process?format=pdf' \
 
 # List examples
 curl http://localhost:8080/examples | jq
+curl 'http://localhost:8080/examples?renderable=true' | jq  # Only complete decks
 
 # Get example content
 curl http://localhost:8080/examples/go/go.dsh
 ```
+
+#### Deck Routing (Shareable URLs)
+
+Direct access to rendered decks with proper URL routing for sharing and navigation.
+
+**Slide Access:** `GET /deck/:examplePath/slide/:num.svg`
+
+Serves a specific slide with rewritten links for in-deck navigation.
+
+```bash
+# View B-17 casualty rates deck
+curl http://localhost:8080/deck/b17/b17.dsh/slide/1.svg
+
+# View election results (7 slides)
+curl http://localhost:8080/deck/elections/elections.dsh/slide/1.svg
+```
+
+Returns SVG with navigation links rewritten to proper URLs (e.g., `/deck/b17/b17.dsh/slide/2.svg`).
+
+**Asset Access:** `GET /deck/:examplePath/asset/:filename`
+
+Serves images and assets referenced in decks.
+
+```bash
+# Access deck image
+curl http://localhost:8080/deck/b17/b17.dsh/asset/iza-vailable.png
+```
+
+**Deck Redirect:** `GET /deck/:examplePath` → Redirects to slide 1
+
+**Features:**
+- Shareable URLs for specific slides
+- In-memory caching for fast access
+- Asset serving with correct paths
+- Link rewriting (temp paths → proper URLs)
+- Path traversal security
 
 ### Cloudflare Worker (localhost:8787 or production)
 
@@ -117,6 +154,27 @@ curl https://deckfs.gedw99.workers.dev/health
 curl -X POST 'https://deckfs.gedw99.workers.dev/process' \
   --data-binary @presentation.dsh | jq -r '.slides[0]' > slide1.svg
 ```
+
+## Demo UI
+
+Interactive demo at `http://localhost:3000` (when using `task pc:up`)
+
+**Features:**
+- Browse all renderable example decks (116 complete presentations)
+- Render custom decksh code in the editor
+- Navigate multi-slide presentations with arrow buttons
+- **Share button** for opening decks in new tabs with shareable URLs
+- **Click SVG links** to navigate between slides within the demo
+- Filter examples by name
+- Grouped examples by directory
+
+**File Types:**
+
+Decksh files come in two types:
+1. **Complete Decks** (116 files) - Contain `deck`/`edeck` structure, can be rendered directly
+2. **Library Files** (159 files) - Contain only `def`/`edef` blocks, used as imports
+
+The demo filters to show only renderable complete decks. See [docs/DECKSH-FILES.md](docs/DECKSH-FILES.md) for details.
 
 ## Project Structure
 
