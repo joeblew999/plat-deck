@@ -23,21 +23,6 @@ tasks:
       - "{{.BUILD_DIR}}/cloudflare/app.wasm"
       - "{{.BUILD_DIR}}/cloudflare/worker.mjs"
 
-  wasi:
-    desc: Build WASI module (wazero, wasmtime)
-    cmds:
-      - mkdir -p {{.BUILD_DIR}}/wasi
-      - tinygo build -target wasi -o {{.BUILD_DIR}}/wasi/deckfs.wasm ./cmd/wasi
-    sources:
-      - cmd/wasi/**/*.go
-      - handler/**/*.go
-      - runtime/**/*.go
-      - internal/**/*.go
-      - go.mod
-      - go.sum
-    generates:
-      - "{{.BUILD_DIR}}/wasi/deckfs.wasm"
-
   host:
     desc: Build wazero host binary
     cmds:
@@ -145,5 +130,4 @@ tasks:
     cmds:
       - task: tools
       - task: cloudflare
-      - task: wasi
       - task: host

@@ -22,14 +22,12 @@ TESTING:
 cmd/cloudflare/  ← PRIMARY: Cloudflare Workers (TinyGo WASM)
 cmd/cli/         ← Testing: native binary
 cmd/wazero/      ← Alternative: standalone Go server
-cmd/wasi/        ← Alternative: WASM module for wazero
 ```
 
 ## What needs what
 
 ```
 DEVELOPMENT:
-  task pc:up           → build:host + build:wasi (process-compose)
   task run:wrangler    → build:cloudflare (long-running)
   task run:demo        → nothing (long-running)
 
@@ -44,7 +42,6 @@ TESTING:
 
 BUILD CHAIN:
   build:host       → cmd/wazero/  → .bin/wazero/deckfs-host (Go binary)
-  build:wasi       → cmd/wasi/    → .bin/wasi/deckfs.wasm (TinyGo WASM)
   build:cloudflare → cmd/cloudflare/ → .bin/cloudflare/app.wasm (TinyGo WASM)
   build:cli        → cmd/cli/     → .bin/deckfs (Go binary)
 ```
@@ -53,7 +50,6 @@ BUILD CHAIN:
 
 ```
 .bin/wazero/deckfs-host  ← Go binary (task build:host)
-.bin/wasi/deckfs.wasm    ← WASM module loaded by host (task build:wasi)
 .bin/cloudflare/app.wasm ← Cloudflare worker (task build:cloudflare)
 ```
 
