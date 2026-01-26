@@ -209,8 +209,14 @@ func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
 	case pipeline.FormatSVG:
 		// SVG returns slides as strings
 		slides := make([]string, len(result.Slides))
-		for i, s := range result.Slides {
-			slides[i] = string(s)
+		for i, slide := range result.Slides {
+			// Rewrite links if source path is provided (for demo UI navigation)
+			if sourcePath != "" {
+				rewritten := s.rewriteSVGLinks(slide, sourcePath)
+				slides[i] = string(rewritten)
+			} else {
+				slides[i] = string(slide)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{

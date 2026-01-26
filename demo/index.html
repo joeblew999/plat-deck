@@ -277,6 +277,39 @@ edeck</textarea>
                 currentSlide = index;
                 previewEl.innerHTML = slides[index];
                 updateNav();
+
+                // Intercept clicks on SVG links to navigate within demo instead of away from it
+                const svg = previewEl.querySelector('svg');
+                if (svg) {
+                    svg.addEventListener('click', (e) => {
+                        // Find if click was on or inside an <a> element
+                        let target = e.target;
+                        while (target && target !== svg) {
+                            // SVG uses lowercase tag names
+                            if (target.tagName.toLowerCase() === 'a') {
+                                // Prevent navigation
+                                e.preventDefault();
+                                e.stopPropagation();
+
+                                // Check if this is a slide navigation link
+                                const href = target.getAttribute('xlink:href') || target.getAttribute('href');
+                                if (href) {
+                                    // Parse slide number from /deck/path/slide/N.svg
+                                    const match = href.match(/\/slide\/(\d+)\.svg$/);
+                                    if (match) {
+                                        const slideNum = parseInt(match[1], 10);
+                                        // Navigate to that slide (convert from 1-indexed to 0-indexed)
+                                        if (slideNum >= 1 && slideNum <= slides.length) {
+                                            showSlide(slideNum - 1);
+                                        }
+                                    }
+                                }
+                                return false;
+                            }
+                            target = target.parentElement;
+                        }
+                    });
+                }
             }
         }
 
