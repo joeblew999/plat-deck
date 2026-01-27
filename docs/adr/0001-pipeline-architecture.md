@@ -70,10 +70,12 @@ func (p *NativePipeline) Process(ctx context.Context, source []byte, format Outp
     // Uses stdin mode - no import support
 }
 
-// With import support
+// With import support and asset resolution
 func (p *NativePipeline) ProcessWithWorkDir(ctx context.Context, source []byte, format OutputFormat, workDir string) (*Result, error) {
     // Writes source to temp file in workDir
     // decksh can resolve relative imports
+    // Renderers run with workDir set to find image assets
+    // PATH includes .bin/deck for dchart and other tools
 }
 
 // File-based processing
@@ -131,7 +133,8 @@ WASM environments lack file system access, but we work around this:
 │   ├── dshlint         # DSL linter
 │   ├── svgdeck         # SVG renderer
 │   ├── pngdeck         # PNG renderer (needs DECKFONTS)
-│   └── pdfdeck         # PDF renderer (needs DECKFONTS)
+│   ├── pdfdeck         # PDF renderer (needs DECKFONTS)
+│   └── dchart          # Chart tool (called by decksh for chart rendering)
 ├── cloudflare/         # Worker WASM (WASMPipeline, deckfs runtime)
 ├── browser/            # Browser WASM (WASMPipeline, deckfs runtime)
 └── wazero/             # Host binary (NativePipeline, deckfs runtime)
@@ -209,6 +212,35 @@ The native pipeline supports imports by switching between two execution modes:
    - Relative imports resolved correctly
 
 The wazero server automatically uses file mode when the `source` query parameter is provided, enabling imports for all examples.
+
+### PATH and Asset Resolution (Native Pipeline)
+
+The native pipeline handles two critical runtime dependencies:
+
+1. **PATH Environment Setup**:
+   - `.bin/deck` directory is added to PATH for all decksh executions
+   - This allows decksh to find `dchart` when processing chart data files (*.d)
+   - Without this, decks using charts would fail with "command not found"
+   - PATH is set for both stdin and file modes
+
+2. **Asset Directory for Renderers**:
+   - Renderers (svgdeck, pngdeck, pdfdeck) need to find image assets (*.png, *.jpg)
+   - `cmd.Dir` is set to the source file's directory (workDir)
+   - Allows relative image paths in deck XML to resolve correctly
+   - Example: `<image xlink:href="logo.png"/>` works when renderer runs from correct directory
+
+3. **Working Directory Flow**:
+   ```
+   Source: .src/deckviz/b17/b17.dsh
+   ↓
+   workDir: .src/deckviz/b17/ (absolute path)
+   ↓
+   decksh runs with PATH including .bin/deck
+   ↓
+   pngdeck runs with cmd.Dir = .src/deckviz/b17/
+   ↓
+   Image assets (iza-vailable.png, etc.) found successfully
+   ```
 
 ### Import Support (WASM Pipeline)
 
