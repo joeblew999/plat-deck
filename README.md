@@ -392,11 +392,26 @@ curl -X POST 'http://localhost:8080/process?format=svg&source=main.dsh' \
 
 ## Contributing
 
+We welcome suggestions, bug reports, and feedback!
+
+**Have an idea?** Open an issue or start a discussion on [GitHub](https://github.com/joeblew99/plat-deck). Whether you're reporting a bug, requesting a feature, or sharing how you're using plat-deck, we'd love to hear from you!
+
+**Want to contribute code?**
 1. Fork the repo
 2. Create a feature branch
 3. Make your changes
 4. Run tests: `task test:unit test:e2e`
 5. Submit a pull request
+
+All contributions are appreciated!
+
+## Acknowledgments
+
+**Special thanks to Anthony Starks ([@ajstarks](https://github.com/ajstarks))** for creating the amazing [deck](https://github.com/ajstarks/deck) and [decksh](https://github.com/ajstarks/decksh) ecosystem.
+
+AJ's elegant design of presentation tools as composable CLI utilities is a masterclass in Unix philosophy. The deck DSL makes creating beautiful presentations from plain text both simple and powerful. His work inspired this project and continues to be its foundation.
+
+plat-deck wouldn't exist without AJ's incredible contributions to the Go community. Thank you for the amazing work!
 
 ## License
 
