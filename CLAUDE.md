@@ -74,6 +74,7 @@ See [docs/adr/](docs/adr/) for Architecture Decision Records.
 
 **Active ADRs**:
 - [ADR-001: Deck Processing Architecture](docs/adr/001-deck-processing-architecture.md) - Addresses duplicate logic bugs and proposes phased refactoring
+- [ADR-002: Auto-Rebuild on File Changes](docs/adr/002-auto-rebuild-on-file-changes.md) - Automatic rebuild system for local development
 
 ## Known Issues & Gotchas
 
@@ -92,30 +93,44 @@ See [docs/adr/](docs/adr/) for Architecture Decision Records.
 
 **Future fix**: See ADR-001 for refactoring plan.
 
-### Build Dependencies
+### Auto-Rebuild System
 
-**cmd/wazero embeds demo/index.html**:
-- When you change `demo/index.html`, you MUST run `task build:host`
-- The wazero binary embeds the HTML via `//go:embed` in `demo/embed.go`
-- Just restarting the server won't pick up HTML changes
+**Local development has automatic rebuilds** (see ADR-002):
+- File watcher automatically rebuilds when you save changes
+- Watches: `demo/`, `handler/`, `runtime/`, `cmd/wazero/`
+- Rebuilds in ~2 seconds after file save
+- No manual commands needed!
 
-**cmd/cloudflare embeds demo/index.html**:
-- When you change `demo/index.html`, you MUST run `task build:cloudflare` and `task cf:deploy`
-- The Cloudflare worker also embeds the HTML
-
-**Quick rebuild checklist**:
+**Requires**: `watchexec` installed (checked by `task util:deps`)
 ```bash
-# Changed demo/index.html?
-task build:host && task pc:restart PROC=wazero  # Local
-task cf:deploy                                   # Cloudflare
+# macOS
+brew install watchexec
 
-# Changed handler/*.go?
-task build:host && task pc:restart PROC=wazero  # Local
-task cf:deploy                                   # Cloudflare
+# Linux
+apt install watchexec  # or: pacman -S watchexec
 
-# Changed runtime/*.go?
-task build:host && task pc:restart PROC=wazero  # Local
-task cf:deploy                                   # Cloudflare
+# Windows
+scoop install watchexec
+```
+
+**How it works**:
+1. You edit a file (e.g., `demo/index.html`)
+2. Save the file
+3. Watcher detects change (~50ms)
+4. Automatically runs: `task build:host && task pc:restart PROC=wazero`
+5. Browser refresh shows changes (~2s total)
+
+**Disable watcher** (if needed):
+```yaml
+# process-compose.yaml
+watcher-wazero:
+  disabled: true  # Add this line
+```
+
+**Cloudflare deployment** (still manual):
+```bash
+# After local testing, deploy to production
+task cf:deploy
 ```
 
 ### Demo UI State Management

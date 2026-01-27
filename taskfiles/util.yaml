@@ -6,6 +6,21 @@ tasks:
     cmds:
       - go mod download && go mod tidy
       - bun install
+      - |
+        # Check for watchexec (required for auto-rebuild)
+        if ! command -v watchexec &> /dev/null; then
+          echo "⚠️  watchexec not found (required for auto-rebuild on file changes)"
+          echo "Install with:"
+          echo "  macOS:   brew install watchexec"
+          echo "  Linux:   apt install watchexec  (or: pacman -S watchexec)"
+          echo "  Windows: scoop install watchexec  (or: choco install watchexec)"
+          echo "  Cargo:   cargo install watchexec-cli"
+          echo ""
+          echo "Auto-rebuild will be disabled without watchexec."
+          echo "You can still develop normally, just run 'task build:host' manually after changes."
+        else
+          echo "✅ watchexec found - auto-rebuild enabled"
+        fi
 
   fmt:
     desc: Format code

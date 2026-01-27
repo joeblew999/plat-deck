@@ -19,3 +19,25 @@ processes:
     disabled: true
     availability:
       restart: "no"
+
+  watcher-wazero:
+    command: |
+      watchexec \
+        --watch demo \
+        --watch handler \
+        --watch runtime \
+        --watch cmd/wazero \
+        --exts go,html \
+        --ignore '*.swp' \
+        --ignore '*.swo' \
+        --ignore '.git' \
+        --debounce 500ms \
+        --clear \
+        --on-busy-update restart \
+        -- sh -c 'echo "🔄 Rebuilding wazero..." && task build:host && echo "✅ Rebuild complete, restarting..." && task pc:restart PROC=wazero'
+    depends_on:
+      wazero:
+        condition: process_started
+    availability:
+      restart: on_failure
+      backoff_seconds: 5

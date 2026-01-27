@@ -25,6 +25,7 @@ We use the following format:
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
 | [001](001-deck-processing-architecture.md) | Deck Processing Architecture Refactoring | Proposed | 2026-01-27 |
+| [002](002-auto-rebuild-on-file-changes.md) | Auto-Rebuild on File Changes | Accepted | 2026-01-27 |
 
 ## How to Propose a New ADR
 
@@ -45,3 +46,4 @@ We use the following format:
 ## Questions?
 
 See [CLAUDE.md](../../CLAUDE.md) for architectural overview and current state.
+| [002](002-auto-rebuild-on-file-changes.md) | Auto-Rebuild on File Changes | Accepted | 2026-01-27 |

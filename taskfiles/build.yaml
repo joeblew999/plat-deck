@@ -38,6 +38,8 @@ tasks:
       - pkg/**/*.go
       - go.mod
       - go.sum
+      - demo/**/*.go
+      - demo/**/*.html
     generates:
       - "{{.BUILD_DIR}}/wazero/deckfs-host"
 
@@ -54,6 +56,8 @@ tasks:
       - pkg/**/*.go
       - go.mod
       - go.sum
+      - demo/**/*.go
+      - demo/**/*.html
     generates:
       - "{{.BUILD_DIR}}/deckfs"
 
