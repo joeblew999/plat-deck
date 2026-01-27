@@ -16,7 +16,7 @@
         }
         .container { max-width: 1800px; margin: 0 auto; }
         h1 { color: #00d4ff; margin-bottom: 5px; }
-        .subtitle { color: #888; margin-bottom: 20px; }
+        .subtitle { color: #888; margin-bottom: 12px; }
         .layout {
             display: grid;
             grid-template-columns: 1fr 2fr;
@@ -110,7 +110,7 @@
         .slide-nav button { padding: 8px 16px; }
         .slide-info { color: #888; font-size: 0.9rem; min-width: 50px; text-align: center; }
         .api-bar {
-            margin-top: 20px;
+            margin-bottom: 20px;
             padding: 12px 15px;
             background: #0f0f23;
             border-radius: 4px;
@@ -142,6 +142,18 @@
         <h1>DeckFS Demo</h1>
         <p class="subtitle">Convert decksh markup to SVG slides</p>
 
+        <div class="api-bar">
+            <strong>API:</strong>
+            <select id="apiSelect">
+                <option value="https://deckfs.gedw99.workers.dev">Production</option>
+                <option value="http://localhost:8787">Wrangler :8787</option>
+                <option value="http://localhost:8080">Wazero :8080</option>
+            </select>
+            <code id="apiUrl">https://deckfs.gedw99.workers.dev/process</code>
+            <span class="spacer"></span>
+            <span class="hint">Arrow keys navigate slides</span>
+        </div>
+
         <div class="layout">
             <div class="panel">
                 <div class="panel-header">
@@ -156,7 +168,6 @@
                             <option value="renderable" selected>Renderable</option>
                         </select>
                     </div>
-                </div>
                 </div>
                 <textarea id="source" placeholder="Enter decksh markup...">deck
     slide "white" "black"
@@ -205,18 +216,6 @@ edeck</textarea>
                     <button id="shareDeck" disabled style="margin-left: auto;" title="Open deck in new tab">📤 Share</button>
                 </div>
             </div>
-        </div>
-
-        <div class="api-bar">
-            <strong>API:</strong>
-            <select id="apiSelect">
-                <option value="https://deckfs.gedw99.workers.dev">Production</option>
-                <option value="http://localhost:8787">Wrangler :8787</option>
-                <option value="http://localhost:8080">Wazero :8080</option>
-            </select>
-            <code id="apiUrl">https://deckfs.gedw99.workers.dev/process</code>
-            <span class="spacer"></span>
-            <span class="hint">Arrow keys navigate slides</span>
         </div>
     </div>
 
