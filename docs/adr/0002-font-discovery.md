@@ -10,78 +10,105 @@ Draft - Needs Research
 
 ## Context
 
-We need to detect what fonts a deck uses for:
-- Pre-caching before rendering
-- Showing users what fonts their deck requires
-- Validating font availability before expensive operations
-- Working in environments without decksh binary (Cloudflare Workers)
+### Current Facts
+
+**SVG rendering:**
+- SVG output contains font references: `<text font-family="Roboto">`
+- Does NOT embed font files
+- Browser/viewer uses its own fonts to render
+- **Font files NOT needed for SVG** ✅
+
+**PNG/PDF rendering:**
+- Requires actual TTF font files
+- pngdeck/pdfdeck need `-fontdir` pointing to .ttf files
+- **Font files REQUIRED for PNG/PDF** ⚠️
+
+**Decksh in Cloudflare:**
+- DOES work - `github.com/ajstarks/decksh` package compiled to WASM
+- Can parse decksh source → deck XML
+- **CAN detect fonts from XML in Cloudflare** ✅
+
+### Why We Need Font Discovery
+
+1. **PNG/PDF Pre-caching** - Fetch font files before rendering
+2. **Web GUI Display** - Show users what fonts their deck uses
+3. **Validation** - Check if required fonts are available
+4. **Size Estimates** - Tell users download size before rendering
 
 ## Decision
 
-NOT READY - need to research and test detection approaches
+NOT READY - need to research detection approaches
 
-## Approaches to Research
+## Detection Strategy
 
-### 1. Decksh Source Detection (Regex-based)
+Since decksh works in Cloudflare (compiled to WASM), we have options:
 
-**Pros:**
-- Fast, no conversion needed
-- Works in Cloudflare Workers (no decksh binary)
-- Can detect before any processing
+### Option A: Always Use Deck XML
 
-**Cons:**
-- Approximate, may miss edge cases
-- Doesn't handle variables, loops, conditionals
-- May over-detect (fonts in comments/strings)
-
-**Need to answer:**
-- What regex patterns cover common cases?
-- How accurate is it on real deckviz examples?
-- What's acceptable false positive/negative rate?
-
-### 2. Deck XML Detection (deck package)
+**Flow:**
+1. Convert decksh → XML (works everywhere)
+2. Parse XML using deck package
+3. Extract fonts from Text/List elements
 
 **Pros:**
-- 100% accurate (canonical format)
-- Type-safe using ajstarks' deck package
-- Handles all decksh features after expansion
+- 100% accurate
+- Single code path
+- Uses canonical format
 
 **Cons:**
-- Requires decksh conversion first
-- Not available in Cloudflare Workers
-- Slower (must run decksh)
+- Must run decksh first
+- Slightly slower
 
-**Need to answer:**
-- Which XML elements contain fonts?
-- How are font defaults handled?
-- What about inherited fonts?
+### Option B: Regex for Quick Preview, XML for Accuracy
 
-### 3. Hybrid Approach
+**Flow:**
+1. Regex decksh source for instant preview (Web GUI as user types)
+2. XML detection for validation before rendering
 
-Use both methods:
-- Decksh detection for fast preview (Web GUI)
-- XML detection for validation before rendering
+**Pros:**
+- Fast preview
+- Accurate validation
 
-**Need to answer:**
-- When to use which method?
-- How to merge results?
-- What if they disagree?
+**Cons:**
+- Two code paths
+- Regex may disagree with XML
+
+### Option C: Regex Only (Fast but Risky)
+
+**Pros:**
+- Fastest
+- Works without conversion
+
+**Cons:**
+- Inaccurate (misses variables, loops, conditionals)
+- May over/under detect fonts
 
 ## Research Tasks
 
-1. Build regex detector, test on 20 random deckviz files
-2. Build XML detector using deck package
-3. Compare results, measure accuracy
-4. Document false positives/negatives
-5. Decide: hybrid vs single approach
+1. Measure decksh→XML conversion time (is it fast enough for real-time?)
+2. If fast enough: Option A (XML only)
+3. If too slow: Build regex detector, measure accuracy
+4. Test on 20 random deckviz files
+5. Decide which option
 
 ## Success Criteria
 
-- Can detect fonts from decksh source with >90% accuracy
-- Can detect fonts from deck XML with 100% accuracy
-- Fast enough for real-time Web GUI (<100ms)
+- Can detect fonts needed for PNG/PDF rendering
+- Fast enough for Web GUI (<500ms)
+- Works in Cloudflare Workers
+- Clear error when fonts unavailable
+
+## Key Insight
+
+**Font files only needed for PNG/PDF, not SVG!**
+
+This simplifies the problem:
+- SVG: No font fetching needed (just names in XML)
+- PNG/PDF: Font fetching required
+- Focus font management on PNG/PDF only
 
 ## References
 
 - [ajstarks/deck package](https://github.com/ajstarks/deck)
-- [decksh syntax](https://github.com/ajstarks/decksh)
+- [decksh package](https://github.com/ajstarks/decksh)
+- Current WASM pipeline: pkg/pipeline/wasm.go

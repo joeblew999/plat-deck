@@ -1,4 +1,4 @@
-# ADR 0004: Font Fetching and Caching
+# ADR 0004: Font Fetching and Caching (PNG/PDF Only)
 
 ## Status
 
@@ -10,11 +10,32 @@ Draft - Needs Architecture
 
 ## Context
 
-Once we know what fonts are needed, we must:
-- Fetch them from Google Fonts (or other source)
-- Handle font families (regular, bold, italic variants)
-- Cache for future use
-- Work in both native and Cloudflare environments
+### Key Insight
+
+**Font files only needed for PNG/PDF rendering, NOT SVG!**
+
+- **SVG**: References font names (`font-family="Roboto"`), browser renders with its fonts
+- **PNG/PDF**: Requires actual TTF files for pngdeck/pdfdeck binaries
+
+**This means:**
+- Cloudflare Workers (SVG only) doesn't need font fetching
+- Native server (PNG/PDF) needs font fetching
+- Simpler problem than initially thought
+
+### When We Need Fonts
+
+Only for native server PNG/PDF rendering:
+```bash
+# SVG - no fonts needed
+curl POST /process?format=svg
+→ Returns SVG with font-family references
+→ No font files required ✅
+
+# PNG - needs font files
+curl POST /process?format=png
+→ Requires TTF files in DECKFONTS directory
+→ Must fetch/cache fonts ⚠️
+```
 
 ## Decision
 
@@ -24,34 +45,26 @@ NOT READY - need to research font families and caching
 
 ### 1. Font Family Variants
 
-When user requests "Roboto", which variants to fetch?
+When user requests "Roboto" for PNG, which variants to fetch?
 
-**Option A - Minimal (Regular only):**
-- 1 file, ~150KB
-- Risk: Missing bold/italic if used
+**Current behavior:**
+- pngdeck looks in `-fontdir` for matching TTF files
+- Need to determine: does it look for Roboto-Regular.ttf? Roboto.ttf? How are variants selected?
 
-**Option B - Common Variants:**
-- Regular + Bold + Italic = 3 files, ~450KB
-- Covers 95% of use cases
-- Some wasted bandwidth if not all used
+**Options:**
+- **Minimal**: Just Regular (~150KB)
+- **Common**: Regular + Bold + Italic (~450KB)
+- **Full Family**: All variants (~1MB)
 
-**Option C - Full Family:**
-- All 10+ variants, ~1MB
-- Complete but wasteful
-
-**Option D - On-Demand:**
-- Start with Regular
-- Fetch Bold/Italic as needed
-- Complex, requires variant detection
-
-**Need to research:**
-- How do pngdeck/pdfdeck request variants?
-- Can we detect which variants a deck uses?
-- What does Google Fonts API return?
+**Research needed:**
+- How does pngdeck select font variants?
+- Test with different variant file names
+- Check ajstarks' deck code for variant logic
 
 ### 2. Caching Strategy
 
-**Local (Native Server):**
+**Native Server Only** (Cloudflare doesn't need it):
+
 ```
 .fonts/
 ├── roboto/
@@ -62,54 +75,62 @@ When user requests "Roboto", which variants to fetch?
     └── regular.ttf
 ```
 
-**Cloudflare (R2 Bucket):**
-```
-R2: deckfs-fonts
-├── roboto/regular.ttf
-├── roboto/bold.ttf
-└── open-sans/regular.ttf
-```
-
 **Questions:**
-- Cache entire families or individual files?
+- Cache full families or individual files?
 - Eviction strategy (LRU, size limit)?
-- How to handle updates (font version changes)?
+- Update strategy (font versions)?
 
 ### 3. Google Fonts API
 
 **Need to research:**
 - API response format
+- What file formats available (TTF, WOFF2)?
+- Which format does pngdeck/pdfdeck support?
 - Rate limits
-- Download URLs format
-- Font file formats available (TTF, WOFF2, etc.)
-- API key requirements
+- Download URLs
 
 ### 4. Fallback Strategy
 
 What if Google Fonts unavailable?
-- System fonts only?
-- Cached fonts only?
-- Error and refuse to render?
-- Substitute similar font?
+
+**Options:**
+- Use existing .src/deckfonts/ as fallback
+- Error and refuse to render
+- System fonts (but which ones?)
+- Substitute similar font
+
+## Scope Simplification
+
+**IMPORTANT:** Font fetching is ONLY for:
+- Native server
+- PNG/PDF formats
+- ~100 users vs millions (Cloudflare SVG)
+
+This changes priorities:
+- Don't need to over-optimize
+- Can start simple (just Regular variant)
+- Add complexity later if needed
+- Cloudflare Workers unaffected
 
 ## Research Tasks
 
-1. Call Google Fonts API, inspect response
-2. Download sample font family, measure sizes
-3. Test pngdeck with different variants
-4. Prototype local cache implementation
-5. Prototype R2 cache implementation
-6. Test API rate limits
+1. Test: How does pngdeck find font files?
+2. Test: Does it support bold/italic variants?
+3. Call Google Fonts API, inspect response
+4. Download sample fonts, test with pngdeck
+5. Prototype local .fonts/ cache
+6. Measure cache size for common fonts
 
 ## Success Criteria
 
 - Can fetch fonts from Google Fonts API
-- Fonts cached efficiently (no duplicates)
-- Works in both native and Cloudflare
-- Graceful fallback when API unavailable
-- Clear error messages when fonts missing
+- pngdeck/pdfdeck can find cached fonts
+- Works with current DECKFONTS env variable
+- Simple cache structure
+- Clear error when fonts missing
 
 ## References
 
 - [Google Fonts API](https://developers.google.com/fonts/docs/developer_api)
-- [Google Fonts](https://fonts.google.com/)
+- pngdeck source: .src/deck/cmd/pngdeck/
+- Current font dir: .src/deckfonts/
