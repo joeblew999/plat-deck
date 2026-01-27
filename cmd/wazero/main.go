@@ -44,6 +44,20 @@ func main() {
 	}
 	runtime.SetPipeline(runtimePipe)
 
+	// Initialize local file storage for examples
+	inputStorage, err := runtime.NewLocalFileStorage(*examplesDir)
+	if err != nil {
+		log.Fatalf("Failed to create input storage: %v", err)
+	}
+
+	// Set runtime with both pipeline and storage
+	runtime.SetRuntime(&runtime.Runtime{
+		InputStorage:  inputStorage,
+		OutputStorage: nil, // wazero does not need output storage
+		KV:            nil, // wazero does not use KV
+		Publisher:     nil, // wazero does not use pub/sub
+	})
+
 	// Create HTTP server
 	server := &Server{
 		pipeline:    pipe,
