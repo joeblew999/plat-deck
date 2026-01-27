@@ -310,7 +310,10 @@ func (s *Server) handleExamplesList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(examples)
+	json.NewEncoder(w).Encode(map[string]any{
+		"examples": examples,
+		"count":    len(examples),
+	})
 }
 
 func (s *Server) handleExampleContent(w http.ResponseWriter, r *http.Request) {

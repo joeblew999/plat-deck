@@ -380,7 +380,8 @@ edeck</textarea>
                     : API_BASE + '/examples';
                 
                 const response = await fetch(url);
-                examplesList = await response.json();
+                const data = await response.json();
+                examplesList = data.examples;
 
                 // Group by directory
                 const groups = {};

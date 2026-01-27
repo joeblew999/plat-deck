@@ -17,6 +17,8 @@ tasks:
       - handler/**/*.go
       - runtime/**/*.go
       - internal/**/*.go
+      - demo/**/*.go
+      - demo/**/*.html
       - go.mod
       - go.sum
     generates:

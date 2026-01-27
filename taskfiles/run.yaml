@@ -16,7 +16,7 @@ tasks:
       - task build:tools
       - lsof -ti :{{.PORT_WAZERO}} | xargs kill -9 2>/dev/null || true
       - echo "Wazero at http://localhost:{{.PORT_WAZERO}}"
-      - DECKFONTS={{.SRC_DIR}}/deckfonts ./{{.BUILD_DIR}}/wazero/deckfs-host -addr :{{.PORT_WAZERO}} -bin {{.BUILD_DIR}}/deck -examples {{.SRC_DIR}}/deckviz
+      - DECKFONTS={{.SOURCE_DIR}}/deckfonts ./{{.BUILD_DIR}}/wazero/deckfs-host -addr :{{.PORT_WAZERO}} -bin {{.BUILD_DIR}}/deck -examples {{.SOURCE_DIR}}/deckviz
 
   demo:
     desc: Run demo server (long-running)

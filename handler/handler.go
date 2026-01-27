@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +33,7 @@ func RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/status/", cors(handleStatus))
 	mux.HandleFunc("/examples", cors(handleListExamples))
 	mux.HandleFunc("/examples/", cors(handleGetExample))
+	mux.HandleFunc("/deck/", cors(handleDeckRoute))
 }
 
 // cors wraps a handler with CORS headers
@@ -415,4 +418,181 @@ func handleGetExample(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write(content)
+}
+
+// handleDeckRoute routes deck requests to slide or asset handlers
+// Supports: /deck/:examplePath/slide/:num.svg or /deck/:examplePath/asset/:filename
+func handleDeckRoute(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/deck/")
+
+	var examplePath string
+	var routeType string
+	var routeParam string
+
+	if strings.Contains(path, "/slide/") {
+		parts := strings.SplitN(path, "/slide/", 2)
+		examplePath = parts[0]
+		routeType = "slide"
+		routeParam = parts[1]
+	} else if strings.Contains(path, "/asset/") {
+		parts := strings.SplitN(path, "/asset/", 2)
+		examplePath = parts[0]
+		routeType = "asset"
+		routeParam = parts[1]
+	} else {
+		// Just the deck path - redirect to slide 1
+		examplePath = path
+		http.Redirect(w, r, fmt.Sprintf("/deck/%s/slide/1.svg", examplePath), http.StatusFound)
+		return
+	}
+
+	// Security: prevent path traversal
+	if strings.Contains(examplePath, "..") || strings.Contains(routeParam, "..") {
+		writeError(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	switch routeType {
+	case "slide":
+		handleDeckSlide(w, r, examplePath, routeParam)
+	case "asset":
+		handleDeckAsset(w, r, examplePath, routeParam)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func handleDeckSlide(w http.ResponseWriter, r *http.Request, examplePath string, slideParam string) {
+	// Parse slide number from "1.svg" -> 1
+	slideNumStr := strings.TrimSuffix(slideParam, ".svg")
+	slideNum, err := strconv.Atoi(slideNumStr)
+	if err != nil || slideNum < 1 {
+		writeError(w, "Invalid slide number", http.StatusBadRequest)
+		return
+	}
+
+	// Read deck source from storage
+	reader, err := runtime.Input().Get(r.Context(), examplePath)
+	if err != nil {
+		writeError(w, "Deck not found", http.StatusNotFound)
+		return
+	}
+	defer reader.Close()
+
+	source, err := io.ReadAll(reader)
+	if err != nil {
+		writeError(w, "Failed to read deck", http.StatusInternalServerError)
+		return
+	}
+
+	// Expand imports if needed
+	source, err = expandImports(r.Context(), source, examplePath)
+	if err != nil {
+		writeError(w, fmt.Sprintf("Import resolution failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Create pipeline and process
+	p := pipeline.NewWASMPipeline()
+	p.WithDimensions(1920, 1080)
+	result, err := p.Process(r.Context(), source, pipeline.FormatSVG)
+	if err != nil {
+		writeError(w, fmt.Sprintf("Failed to render deck: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Check slide exists
+	if slideNum > len(result.Slides) {
+		writeError(w, "Slide not found", http.StatusNotFound)
+		return
+	}
+
+	// Get slide (1-indexed)
+	slide := result.Slides[slideNum-1]
+
+	// Rewrite links in SVG
+	rewrittenSlide := rewriteSVGLinks(slide, examplePath)
+
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Write(rewrittenSlide)
+}
+
+func handleDeckAsset(w http.ResponseWriter, r *http.Request, examplePath string, filename string) {
+	// Security: prevent path traversal
+	if strings.Contains(filename, "..") || strings.Contains(filename, "/") {
+		writeError(w, "Invalid asset path", http.StatusBadRequest)
+		return
+	}
+
+	// Get directory of the deck file
+	lastSlash := strings.LastIndex(examplePath, "/")
+	var assetPath string
+	if lastSlash >= 0 {
+		deckDir := examplePath[:lastSlash]
+		assetPath = deckDir + "/" + filename
+	} else {
+		assetPath = filename
+	}
+
+	// Read asset from storage
+	reader, err := runtime.Input().Get(r.Context(), assetPath)
+	if err != nil {
+		writeError(w, "Asset not found", http.StatusNotFound)
+		return
+	}
+	defer reader.Close()
+
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		writeError(w, "Failed to read asset", http.StatusInternalServerError)
+		return
+	}
+
+	// Set content type based on extension
+	contentType := "application/octet-stream"
+	if strings.HasSuffix(filename, ".png") {
+		contentType = "image/png"
+	} else if strings.HasSuffix(filename, ".jpg") || strings.HasSuffix(filename, ".jpeg") {
+		contentType = "image/jpeg"
+	} else if strings.HasSuffix(filename, ".gif") {
+		contentType = "image/gif"
+	} else if strings.HasSuffix(filename, ".svg") {
+		contentType = "image/svg+xml"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Write(content)
+}
+
+func rewriteSVGLinks(svg []byte, examplePath string) []byte {
+	svgStr := string(svg)
+
+	// Rewrite temporary file path links to deck URLs
+	// Pattern: /var/folders/.../T/deckfs-NNNN/deck-00001.svg
+	linkPattern := regexp.MustCompile(`xlink:href="[^"]*(/deck-(\d{5})\.svg)"`)
+
+	rewritten := linkPattern.ReplaceAllStringFunc(svgStr, func(match string) string {
+		submatches := linkPattern.FindStringSubmatch(match)
+		if len(submatches) >= 3 {
+			slideNum := submatches[2]
+			num, _ := strconv.Atoi(slideNum)
+			return fmt.Sprintf(`xlink:href="/deck/%s/slide/%d.svg"`, examplePath, num)
+		}
+		return match
+	})
+
+	// Rewrite image asset references
+	// Pattern: xlink:href="filename.png"
+	assetPattern := regexp.MustCompile(`xlink:href="([^"/][^"]*\.(png|jpg|jpeg|gif|svg))"`)
+
+	rewritten = assetPattern.ReplaceAllStringFunc(rewritten, func(match string) string {
+		submatches := assetPattern.FindStringSubmatch(match)
+		if len(submatches) >= 2 {
+			filename := submatches[1]
+			return fmt.Sprintf(`xlink:href="/deck/%s/asset/%s"`, examplePath, filename)
+		}
+		return match
+	})
+
+	return []byte(rewritten)
 }
