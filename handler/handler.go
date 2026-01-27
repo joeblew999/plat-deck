@@ -529,6 +529,18 @@ func handleDeckSlide(w http.ResponseWriter, r *http.Request, examplePath string,
 		return
 	}
 
+	// Check if file is renderable (contains deck declaration)
+	contentStr := string(source)
+	isRenderable := strings.HasPrefix(contentStr, "deck\n") ||
+		strings.HasPrefix(contentStr, "deck ") ||
+		strings.Contains(contentStr, "\ndeck\n") ||
+		strings.Contains(contentStr, "\ndeck ")
+
+	if !isRenderable {
+		writeError(w, "File is not a renderable deck (library file with only function definitions)", http.StatusBadRequest)
+		return
+	}
+
 	// Expand imports if needed
 	source, err = expandImports(r.Context(), source, examplePath)
 	if err != nil {
