@@ -7,18 +7,18 @@ processes:
   wazero:
     command: task run:wazero
     availability:
-      restart: "no"
+      restart: "always"
 
   demo:
     command: task run:demo
     availability:
-      restart: "no"
+      restart: "always"
 
   wrangler:
     command: task run:wrangler
     disabled: true
     availability:
-      restart: "no"
+      restart: "always"
 
   watcher-wazero:
     command: |
@@ -34,7 +34,7 @@ processes:
         --debounce 500ms \
         --clear \
         --on-busy-update restart \
-        -- sh -c 'echo "🔄 Rebuilding wazero..." && task build:host && echo "✅ Rebuild complete, restarting..." && task pc:restart PROC=wazero'
+        -- sh -c 'echo "🔄 Rebuilding wazero..." && task build:host && echo "✅ Rebuild complete, restarting..." && lsof -ti :8080 | xargs kill -9 2>/dev/null || true'
     depends_on:
       wazero:
         condition: process_started
