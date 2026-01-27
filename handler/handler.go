@@ -1,4 +1,3 @@
-//go:build js || tinygo || cloudflare
 
 // Package handler provides HTTP handlers that work across all runtimes
 package handler

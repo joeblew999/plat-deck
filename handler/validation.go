@@ -1,4 +1,3 @@
-//go:build js || tinygo || cloudflare
 
 package handler
 

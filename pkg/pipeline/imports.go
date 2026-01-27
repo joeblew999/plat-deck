@@ -1,4 +1,3 @@
-//go:build js || tinygo || cloudflare
 
 // Package pipeline provides import resolution for WASM environments
 //
