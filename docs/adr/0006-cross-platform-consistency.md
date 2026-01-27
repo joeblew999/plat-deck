@@ -1,7 +1,8 @@
 # ADR 0006: Cross-Platform Consistency Architecture
 
-**Status:** Proposed
+**Status:** Partially Implemented (Phase 1 & 2 Complete)
 **Date:** 2026-01-27
+**Last Updated:** 2026-01-27
 **Deciders:** Development Team
 
 ## Context
@@ -250,3 +251,77 @@ Use consistently in all handlers.
 5. Update handler to use runtime.Pipeline
 6. Remove duplicated handlers from wazero
 7. Add comprehensive tests
+
+## Implementation Status
+
+### ✅ Phase 1: Pipeline Abstraction (Complete)
+
+**Files Created:**
+- `runtime/pipeline.go` - Pipeline interface and global accessor
+- `runtime/pipeline_wasm.go` - WASM implementation for Cloudflare Workers
+- `runtime/pipeline_native.go` - Native implementation for wazero/CLI
+
+**Key Interface:**
+```go
+type Pipeline interface {
+    Process(ctx context.Context, source []byte, format Format) (*ProcessResult, error)
+    ProcessWithWorkDir(ctx context.Context, source []byte, format Format, workDir string) (*ProcessResult, error)
+    SupportedFormats() []Format
+}
+```
+
+**Testing:** Both implementations build and run successfully.
+
+### ✅ Phase 2: Handler Consolidation (Complete)
+
+**Files Modified:**
+- `handler/handler.go` - Updated to use `runtime.GetPipeline()`
+  - `handleProcess()` - Uses runtime pipeline
+  - `handleUpload()` - Uses runtime pipeline
+  - `handleDeckSlide()` - Uses runtime pipeline
+- `cmd/cloudflare/main.go` - Initializes WASMPipeline
+- `cmd/wazero/main.go` - Initializes NativePipeline
+
+**Benefits Achieved:**
+- ✅ Single handler codebase for all platforms
+- ✅ Compile-time API compatibility
+- ✅ Runtime pipeline swapping works
+- ✅ Both platforms tested and working
+
+**Known Limitations:**
+- Custom dimensions from query params not yet supported (TODO added)
+- Wazero still has some custom handlers (will migrate in future)
+
+### 🔄 Phase 3: Response Type Safety (Pending)
+
+**Next Steps:**
+- Define shared response types in `handler/types.go`
+- Ensure consistent JSON structure across all endpoints
+- Add validation
+
+### 🔄 Phase 4: Build System Improvements (Pending)
+
+**Next Steps:**
+- Add lint rule to prevent handler importing platform-specific packages
+- Enforce variable naming consistency
+- Pre-commit hook for cross-platform build validation
+
+### 🔄 Phase 5: Testing Strategy (Pending)
+
+**Next Steps:**
+- Shared handler unit tests with mocked runtime
+- Integration tests for each runtime implementation
+- E2E tests covering all platforms with same test cases
+
+## Outcomes
+
+**Immediate Wins:**
+1. No more API format mismatches - single pipeline interface
+2. Handler code works on both Cloudflare and wazero
+3. Easy to add new platforms - just implement Pipeline interface
+4. Foundation for remaining phases
+
+**Technical Debt Reduced:**
+- Removed duplicate pipeline initialization logic
+- Centralized deck processing in runtime abstraction
+- Clearer separation: handler (logic) vs runtime (platform)
