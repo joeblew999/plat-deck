@@ -1,10 +1,28 @@
 # plat-deck
 
-Cross-platform decksh presentation renderer
+Cross-platform decksh presentation renderer with **auto-rebuild for instant development feedback**
 
 Demo: https://deckfs.gedw99.workers.dev/
 
-Process [decksh](https://github.com/ajstarks/decksh) presentations to **SVG, PNG, and PDF** using two deployment modes:
+Process [decksh](https://github.com/ajstarks/decksh) presentations to **SVG, PNG, and PDF** using two deployment modes.
+
+## At a Glance
+
+**For Developers:**
+```bash
+task pc:up          # One command to start everything
+# Edit files → Save → Auto-rebuilds in ~3s → Refresh browser
+# Zero manual rebuild steps!
+```
+
+**For Users:**
+- 🌐 **Try it now**: https://deckfs.gedw99.workers.dev/
+- 📦 **275 example presentations** built-in
+- 🎨 **3 output formats**: SVG, PNG, PDF
+- ⚡ **Edge deployment**: <100ms global latency (Cloudflare Workers)
+- 🖥️ **Local server**: Full font support + filesystem access
+
+## Deployment Modes
 
 ## Deployment Modes
 
@@ -25,12 +43,23 @@ TinyGo WASM for serverless edge deployment
 
 ## Quick Start
 
+**Development is dead simple** - one command starts everything with auto-rebuild on file changes!
+
 ### Prerequisites
 
 - Go 1.24+
 - [Task](https://taskfile.dev/)
+- [watchexec](https://github.com/watchexec/watchexec) (for auto-rebuild)
 - [TinyGo](https://tinygo.org/) (for Cloudflare builds)
 - [Bun](https://bun.sh/) (for demo server)
+
+```bash
+# macOS
+brew install go-task watchexec tinygo bun
+
+# Linux
+apt install watchexec  # or: pacman -S watchexec
+```
 
 ### 1. Clone and Setup
 
@@ -38,30 +67,70 @@ TinyGo WASM for serverless edge deployment
 git clone https://github.com/joeblew999/plat-deck.git
 cd plat-deck
 
-# Clone ajstarks' repos for binaries and examples
-task test:clone
-
-# Build ajstarks' binaries and wazero host
-task build:host
-task build:tools
+# One-time setup: clone examples and build everything
+task test:clone    # Clone ajstarks' repos (examples, fonts)
+task build:host    # Build wazero server
+task build:tools   # Build ajstarks binaries (decksh, svgdeck, etc)
 ```
 
-### 2. Run Native Server
+### 2. Start Developing (One Command!)
 
 ```bash
-# Option A: Everything together (recommended)
 task pc:up
-# Starts wazero (:8080) + demo (:3000)
+```
 
-# Option B: Individual services
+**That's it!** This starts:
+- ✅ Wazero API server at http://localhost:8080
+- ✅ Demo UI at http://localhost:3000
+- ✅ File watcher with **auto-rebuild** (~3s after save)
+
+Now just edit files and save - changes appear automatically!
+
+```bash
+# Edit any file
+vim demo/index.html
+vim handler/handler.go
+vim runtime/runtime.go
+
+# Save the file
+# ⏱️  Wait ~3 seconds
+# ✅ Auto-rebuild complete
+# 🔄 Refresh browser → See your changes!
+
+# Zero manual rebuild commands needed!
+```
+
+### Developer Experience
+
+**Before**: Edit → Remember to rebuild → Remember to restart → Refresh → Debug why it didn't work (forgot to rebuild)
+
+**Now**: Edit → Save → Refresh → Done!
+
+**Auto-watches**:
+- `demo/*.html` - UI changes
+- `handler/*.go` - API logic
+- `runtime/*.go` - Core runtime
+- `cmd/wazero/*.go` - Server code
+
+**Optional: Individual Services**
+```bash
 task run:wazero    # API only on :8080
 task run:demo      # Demo UI only on :3000
 ```
 
-Open http://localhost:8080 or http://localhost:3000 to try it.
+### 3. Deploy to Production (When Ready)
 
-### 3. Run Cloudflare Worker Locally
+Development has auto-rebuild, but deployment is **manual** (for safety):
 
+```bash
+# Test locally first with task pc:up
+# Then deploy to Cloudflare Workers
+task cf:deploy
+```
+
+Your changes are now live at https://deckfs.YOUR-SUBDOMAIN.workers.dev/
+
+**Testing Cloudflare Locally** (optional):
 ```bash
 task run:wrangler
 # Starts local Cloudflare emulator on :8787
@@ -239,20 +308,33 @@ plat-deck/
 
 ## Available Tasks
 
-Run `task --list` to see all tasks. Key tasks:
+Run `task --list` to see all tasks.
+
+### Daily Development (What You'll Actually Use)
 
 ```bash
-# Development
-task pc:up              # Start all services (wazero + demo)
-task run:wrangler       # Cloudflare worker locally (:8787)
-task run:wazero         # Wazero server locally (:8080)
-task run:demo           # Demo server only (:3000)
+task pc:up              # Start everything with auto-rebuild ⭐
+task pc:down            # Stop all services
+task pc:status          # Check what's running
+task pc:logs            # View logs (PROC=wazero or watcher-wazero)
+task cf:deploy          # Deploy to Cloudflare Workers
+```
 
-# Building
+**That's it!** The auto-rebuild system handles everything else.
+
+### Advanced/Optional Tasks
+
+```bash
+# Manual building (auto-rebuild does this for you)
 task build:host         # Build wazero host binary
 task build:tools        # Build ajstarks binaries (decksh, svgdeck, etc)
 task build:cloudflare   # Build Cloudflare worker WASM
 task build:cli          # Build CLI tool
+
+# Alternative running modes
+task run:wrangler       # Cloudflare worker locally (:8787)
+task run:wazero         # Wazero server only (:8080)
+task run:demo           # Demo UI only (:3000)
 
 # Testing
 task test:unit          # Run Go tests
@@ -260,13 +342,14 @@ task test:e2e           # End-to-end tests
 task test:decksh        # Test against decksh examples
 task test:deckviz       # Test against deckviz examples
 
-# Deployment
-task cf:deploy          # Deploy to Cloudflare Workers
+# Deployment/Cloudflare
 task cf:setup           # Create R2 buckets, KV, Queue
+task cf:sync-examples   # Upload examples to R2
 task cf:teardown        # Remove Cloudflare resources
 
-# Setup
+# Setup (one-time)
 task test:clone         # Clone ajstarks repos
+task util:deps          # Check/install dependencies
 ```
 
 ## Environment Variables
