@@ -226,6 +226,7 @@ edeck</textarea>
         // Examples loaded dynamically from .src/deckviz
         let examplesList = [];
         let currentSourcePath = ''; // Track current example path for import resolution
+        let isLoadingExample = false; // Flag to prevent input handler from clearing path during load
 
         let slides = [];
         let currentSlide = 0;
@@ -250,8 +251,10 @@ edeck</textarea>
         // Auto-detect localhost
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
             apiSelectEl.value = 'http://localhost:8080';
-            updateApiUrl();
         }
+
+        // Always update API URL on page load
+        updateApiUrl();
 
         apiSelectEl.addEventListener('change', () => {
             updateApiUrl();
@@ -366,71 +369,114 @@ edeck</textarea>
 
         // Clear source path when user manually edits
         sourceEl.addEventListener('input', () => {
-            currentSourcePath = '';
-            updateNav(); // Update share button state
+            if (!isLoadingExample) {  // Only clear if user is manually editing
+                currentSourcePath = '';
+                updateNav(); // Update share button state
+            }
         });
 
         // Load examples list from API
         async function loadExamplesList() {
             try {
                 const filterMode = document.getElementById('filter').value;
-                const url = filterMode === 'renderable' 
+                const url = filterMode === 'renderable'
                     ? API_BASE + '/examples?renderable=true'
                     : API_BASE + '/examples';
-                
+
+                console.log('Loading examples from:', url);
                 const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
                 const data = await response.json();
+                console.log('Loaded examples:', data.count || data.examples?.length || 0);
                 examplesList = data.examples;
 
-                // Group by directory
-                const groups = {};
-                examplesList.forEach(ex => {
-                    const parts = ex.name.split('/');
-                    const dir = parts.length > 1 ? parts[0] : 'root';
-                    if (!groups[dir]) groups[dir] = [];
-                    groups[dir].push(ex);
-                });
+                // Populate dropdown
+                populateDropdown();
 
-                // Populate dropdown with optgroups
-                const modeLabel = filterMode === 'renderable' ? ' Renderable' : ' All';
-                examplesEl.innerHTML = `<option value="">Examples (${examplesList.length}${modeLabel})</option>`;
-                
-                Object.keys(groups).sort().forEach(dir => {
-                    const optgroup = document.createElement('optgroup');
-                    optgroup.label = dir.charAt(0).toUpperCase() + dir.slice(1);
-                    groups[dir].forEach(ex => {
-                        const opt = document.createElement('option');
-                        opt.value = ex.path;
-                        const fileName = ex.name.split('/').pop();
-                        opt.textContent = fileName;
-                        if (ex.renderable === false) {
-                            opt.textContent += ' [lib]';
-                            opt.style.color = '#888';
-                            opt.style.fontStyle = 'italic';
-                        }
-                        optgroup.appendChild(opt);
-                    });
-                    examplesEl.appendChild(optgroup);
-                });
+                // Now that dropdown is populated, load from URL if needed
+                await loadFromUrl();
             } catch (err) {
-                console.error('Failed to load examples:', err);
+                console.error('Failed to load examples list:', err);
+                alert('Failed to load examples: ' + err.message + '\n\nCheck console for details.');
                 examplesEl.innerHTML = '<option value="">Examples (offline)</option>';
+            }
+        }
+
+        // Populate dropdown from examplesList
+        function populateDropdown() {
+            const filterMode = document.getElementById('filter').value;
+
+            // Group by directory
+            const groups = {};
+            examplesList.forEach(ex => {
+                const parts = ex.name.split('/');
+                const dir = parts.length > 1 ? parts[0] : 'root';
+                if (!groups[dir]) groups[dir] = [];
+                groups[dir].push(ex);
+            });
+
+            // Populate dropdown with optgroups
+            const modeLabel = filterMode === 'renderable' ? ' Renderable' : ' All';
+            examplesEl.innerHTML = `<option value="">Examples (${examplesList.length}${modeLabel})</option>`;
+
+            Object.keys(groups).sort().forEach(dir => {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = dir.charAt(0).toUpperCase() + dir.slice(1);
+                groups[dir].forEach(ex => {
+                    const opt = document.createElement('option');
+                    opt.value = ex.path;
+                    const fileName = ex.name.split('/').pop();
+                    opt.textContent = fileName;
+                    if (ex.renderable === false) {
+                        opt.textContent += ' [lib]';
+                        opt.style.color = '#888';
+                        opt.style.fontStyle = 'italic';
+                    }
+                    optgroup.appendChild(opt);
+                });
+                examplesEl.appendChild(optgroup);
+            });
+        }
+
+        // Load and process an example
+        async function loadExample(examplePath) {
+            if (!examplePath) return;
+
+            try {
+                setStatus('Loading example...', 'processing');
+                const response = await fetch(API_BASE + '/examples/' + examplePath);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const content = await response.text();
+
+                // Set flag and currentSourcePath before updating textarea
+                isLoadingExample = true;
+                currentSourcePath = examplePath;
+                sourceEl.value = content;
+                isLoadingExample = false;
+
+                examplesEl.value = examplePath;
+
+                // Update URL without page reload
+                const url = new URL(window.location);
+                url.searchParams.set('example', examplePath);
+                window.history.pushState({}, '', url);
+
+                await process();
+            } catch (err) {
+                isLoadingExample = false; // Reset flag on error
+                console.error('Failed to load example:', err);
+                setStatus(`Failed to load example: ${err.message}`, 'error');
             }
         }
 
         // Auto-process on example selection
         examplesEl.addEventListener('change', async (e) => {
             if (e.target.value) {
-                try {
-                    const response = await fetch(API_BASE + '/examples/' + e.target.value);
-                    const content = await response.text();
-                    sourceEl.value = content;
-                    currentSourcePath = e.target.value; // Track source path for imports
-                    examplesEl.value = '';
-                    process();
-                } catch (err) {
-                    setStatus('Failed to load example', 'error');
-                }
+                await loadExample(e.target.value);
             }
         });
 
@@ -445,6 +491,23 @@ edeck</textarea>
         });
 
         updateNav();
+
+        // Load example from URL parameter on page load
+        async function loadFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const examplePath = urlParams.get('example');
+
+            // Wait for examples list to load first
+            if (examplePath && examplesList.length > 0) {
+                await loadExample(examplePath);
+            }
+        }
+
+        // Handle browser back/forward navigation
+        window.addEventListener('popstate', () => {
+            loadFromUrl();
+        });
+
         // Search functionality
         document.getElementById('search').addEventListener('input', (e) => {
             const searchTerm = e.target.value.toLowerCase();

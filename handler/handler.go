@@ -117,9 +117,28 @@ func handleProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Process using runtime pipeline
-	// TODO: Support custom dimensions from query params
-	result, err := runtime.GetPipeline().Process(r.Context(), source, runtime.FormatSVG)
+	// Process using runtime pipeline with working directory
+	// The working directory allows decksh to find .d and .kml data files
+	// For native pipelines with local filesystem, convert storage key to filesystem path
+	workDir := ""
+
+	// If sourcePath provided and storage implements FilesystemStorage, get the filesystem path
+	if sourcePath != "" {
+		if fsStorage, ok := runtime.Input().(runtime.FilesystemStorage); ok {
+			// Get directory containing the .dsh file
+			deckDir := sourcePath
+			if idx := strings.LastIndex(sourcePath, "/"); idx >= 0 {
+				deckDir = sourcePath[:idx]
+			}
+
+			// Convert storage key to filesystem path
+			if fullPath, err := fsStorage.FullPath(deckDir); err == nil {
+				workDir = fullPath
+			}
+		}
+	}
+
+	result, err := runtime.GetPipeline().ProcessWithWorkDir(r.Context(), source, runtime.FormatSVG, workDir)
 	if err != nil {
 		writeError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -127,6 +146,10 @@ func handleProcess(w http.ResponseWriter, r *http.Request) {
 
 	slides := make([]string, len(result.Slides))
 	for i, s := range result.Slides {
+		// Rewrite image and link paths if we have a source path
+		if sourcePath != "" {
+			s = rewriteSVGLinks(s, sourcePath)
+		}
 		slides[i] = string(s)
 	}
 
@@ -548,8 +571,26 @@ func handleDeckSlide(w http.ResponseWriter, r *http.Request, examplePath string,
 		return
 	}
 
-	// Process using runtime pipeline
-	result, err := runtime.GetPipeline().Process(r.Context(), source, runtime.FormatSVG)
+	// Process using runtime pipeline with working directory
+	// The working directory allows decksh to find .d and .kml data files
+	// For native pipelines with local filesystem, convert storage key to filesystem path
+	workDir := ""
+
+	// If storage implements FilesystemStorage, get the actual filesystem path
+	if fsStorage, ok := runtime.Input().(runtime.FilesystemStorage); ok {
+		// Get directory containing the .dsh file
+		deckDir := examplePath
+		if idx := strings.LastIndex(examplePath, "/"); idx >= 0 {
+			deckDir = examplePath[:idx]
+		}
+
+		// Convert storage key to filesystem path
+		if fullPath, err := fsStorage.FullPath(deckDir); err == nil {
+			workDir = fullPath
+		}
+	}
+
+	result, err := runtime.GetPipeline().ProcessWithWorkDir(r.Context(), source, runtime.FormatSVG, workDir)
 	if err != nil {
 		writeError(w, fmt.Sprintf("Failed to render deck: %v", err), http.StatusInternalServerError)
 		return

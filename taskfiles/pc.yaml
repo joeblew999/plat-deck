@@ -4,7 +4,6 @@ tasks:
   up:
     desc: Start servers in background (detached)
     cmds:
-      - task build:wasi
       - task build:host
       - process-compose up --port {{.PORT_PC}} -D
       - |

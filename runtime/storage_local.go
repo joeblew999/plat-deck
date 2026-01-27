@@ -57,6 +57,12 @@ func (s *LocalFileStorage) fullPath(key string) (string, error) {
 	return absPath, nil
 }
 
+// FullPath returns the absolute file system path for a storage key
+// This is used by native pipelines that need actual file paths for working directories
+func (s *LocalFileStorage) FullPath(key string) (string, error) {
+	return s.fullPath(key)
+}
+
 func (s *LocalFileStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	path, err := s.fullPath(key)
 	if err != nil {

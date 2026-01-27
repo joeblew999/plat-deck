@@ -14,6 +14,13 @@ type Storage interface {
 	Delete(ctx context.Context, key string) error
 }
 
+// FilesystemStorage is an optional interface for storage backends that map to local filesystems
+// This allows native pipelines to get actual filesystem paths for workDir support
+type FilesystemStorage interface {
+	Storage
+	FullPath(key string) (string, error)
+}
+
 // ListResult holds storage listing results
 type ListResult struct {
 	Keys              []string
