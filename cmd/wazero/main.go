@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/joeblew999/deckfs/pkg/pipeline"
+	"github.com/joeblew999/deckfs/runtime"
 )
 
 func main() {
@@ -35,6 +36,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create pipeline: %v", err)
 	}
+
+	// Initialize runtime pipeline
+	runtimePipe, err := runtime.NewNativePipeline(*binDir)
+	if err != nil {
+		log.Fatalf("Failed to create runtime pipeline: %v", err)
+	}
+	runtime.SetPipeline(runtimePipe)
 
 	// Create HTTP server
 	server := &Server{

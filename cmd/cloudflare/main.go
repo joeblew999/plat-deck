@@ -42,6 +42,10 @@ func initRuntime() {
 		OutputStorage: outputStorage,
 		KV:            kvStore,
 	})
+
+	// Initialize pipeline
+	pipeline := runtime.NewWASMPipeline()
+	runtime.SetPipeline(pipeline)
 }
 
 // consumeQueue handles R2 event notifications from the queue

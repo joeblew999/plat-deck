@@ -100,21 +100,9 @@ func handleProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create pipeline
-	p := pipeline.NewWASMPipeline()
-
-	// Parse dimensions from query params
-	width, height := 1920, 1080
-	if ws := r.URL.Query().Get("width"); ws != "" {
-		fmt.Sscanf(ws, "%d", &width)
-	}
-	if hs := r.URL.Query().Get("height"); hs != "" {
-		fmt.Sscanf(hs, "%d", &height)
-	}
-	p.WithDimensions(width, height)
-
-	// Process
-	result, err := p.Process(r.Context(), source, pipeline.FormatSVG)
+	// Process using runtime pipeline
+	// TODO: Support custom dimensions from query params
+	result, err := runtime.GetPipeline().Process(r.Context(), source, runtime.FormatSVG)
 	if err != nil {
 		writeError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -168,9 +156,8 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Process
-	p := pipeline.NewWASMPipeline()
-	result, err := p.Process(ctx, processSource, pipeline.FormatSVG)
+	// Process using runtime pipeline
+	result, err := runtime.GetPipeline().Process(ctx, processSource, runtime.FormatSVG)
 	if err != nil {
 		writeError(w, fmt.Sprintf("Processing failed: %v", err), http.StatusBadRequest)
 		return
@@ -492,10 +479,8 @@ func handleDeckSlide(w http.ResponseWriter, r *http.Request, examplePath string,
 		return
 	}
 
-	// Create pipeline and process
-	p := pipeline.NewWASMPipeline()
-	p.WithDimensions(1920, 1080)
-	result, err := p.Process(r.Context(), source, pipeline.FormatSVG)
+	// Process using runtime pipeline
+	result, err := runtime.GetPipeline().Process(r.Context(), source, runtime.FormatSVG)
 	if err != nil {
 		writeError(w, fmt.Sprintf("Failed to render deck: %v", err), http.StatusInternalServerError)
 		return
