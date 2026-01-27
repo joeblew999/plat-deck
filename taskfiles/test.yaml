@@ -26,13 +26,7 @@ tasks:
     desc: End-to-end test
     cmds:
       - task build:cli
-      - |
-        echo 'deck
-          slide "white" "black"
-            ctext "Hello World" 50 50 5
-          eslide
-        edeck' | ./{{.BUILD_DIR}}/deckfs process > /tmp/deckfs-test.json
-      - grep -q '"success":true' /tmp/deckfs-test.json && echo "✓ E2E passed" || (echo "✗ E2E failed" && exit 1)
+      - ./test-e2e.sh
 
   deckviz:
     desc: Test with deckviz repo files

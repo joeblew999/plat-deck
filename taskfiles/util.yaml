@@ -30,10 +30,18 @@ tasks:
       - rm -rf {{.BUILD_DIR}} {{.SOURCE_DIR}} .wrangler node_modules
       - go clean -cache
 
+  install-hooks:
+    desc: Install git hooks
+    cmds:
+      - cp .githooks/pre-commit .git/hooks/pre-commit
+      - chmod +x .git/hooks/pre-commit
+      - echo "✅ Pre-commit hook installed"
+
   setup:
     desc: Full setup
     cmds:
       - task: deps
+      - task: install-hooks
       - task cf:setup
       - task build:all
       - 'echo "Done! Update wrangler.toml with KV ID, then: task cf:deploy"'

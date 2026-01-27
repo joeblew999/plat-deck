@@ -1,0 +1,31 @@
+#!/bin/sh
+# Pre-commit hook for cross-platform build validation
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Check if handler files changed
+HANDLER_CHANGED=$(git diff --cached --name-only | grep '^handler/' || true)
+RUNTIME_CHANGED=$(git diff --cached --name-only | grep '^runtime/' || true)
+TASKFILES_CHANGED=$(git diff --cached --name-only | grep '^taskfiles/\|^Taskfile.yaml' || true)
+
+# Always run lint checks if handler or runtime changed
+if [ -n "$HANDLER_CHANGED" ] || [ -n "$RUNTIME_CHANGED" ]; then
+  echo "→ Handler or runtime files changed, running lint checks..."
+  task lint:all
+fi
+
+# Check Taskfile consistency if taskfiles changed
+if [ -n "$TASKFILES_CHANGED" ]; then
+  echo "→ Taskfiles changed, checking consistency..."
+  task lint:taskfile
+fi
+
+# Try to build cloudflare target if handler changed
+if [ -n "$HANDLER_CHANGED" ]; then
+  echo "→ Handler changed, verifying cloudflare build..."
+  task build:cloudflare
+fi
+
+echo "✅ Pre-commit checks passed"

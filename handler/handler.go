@@ -66,17 +66,25 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Serve API info for non-browser requests
-	writeJSON(w, map[string]any{
-		"service":   "deckfs",
-		"version":   Version,
-		"endpoints": []string{"/health", "/process", "/slides/:key", "/manifest/:name", "/decks", "/upload/:key", "/status/:key", "/examples", "/examples/:path"},
+	formats := runtime.GetPipeline().SupportedFormats()
+	formatStrs := make([]string, len(formats))
+	for i, f := range formats {
+		formatStrs[i] = string(f)
+	}
+
+	writeJSON(w, RootResponse{
+		Service:   "deckfs",
+		Version:   Version,
+		Runtime:   "wasm",
+		Endpoints: []string{"/health", "/process", "/slides/:key", "/manifest/:name", "/decks", "/upload/:key", "/status/:key", "/examples", "/examples/:path"},
+		Formats:   formatStrs,
 	})
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{
-		"status":  "ok",
-		"version": Version,
+	writeJSON(w, HealthResponse{
+		Status:  "ok",
+		Runtime: "wasm",
 	})
 }
 
@@ -92,8 +100,18 @@ func handleProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Expand imports if needed (WASM only)
+	// Validate sourcePath if provided
 	sourcePath := r.URL.Query().Get("source")
+	if sourcePath != "" {
+		v := NewValidator()
+		v.RequireNoPathTraversal("source", sourcePath)
+		if !v.IsValid() {
+			writeError(w, v.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Expand imports if needed (WASM only)
 	source, err = expandImports(r.Context(), source, sourcePath)
 	if err != nil {
 		writeError(w, fmt.Sprintf("Import resolution failed: %v", err), http.StatusBadRequest)
@@ -113,11 +131,12 @@ func handleProcess(w http.ResponseWriter, r *http.Request) {
 		slides[i] = string(s)
 	}
 
-	writeJSON(w, map[string]any{
-		"success":    true,
-		"title":      result.Title,
-		"slideCount": result.SlideCount,
-		"slides":     slides,
+	writeJSON(w, ProcessResponse{
+		Success:    true,
+		Title:      result.Title,
+		SlideCount: result.SlideCount,
+		Slides:     slides,
+		Format:     "svg",
 	})
 }
 
@@ -128,8 +147,17 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := strings.TrimPrefix(r.URL.Path, "/upload/")
-	if key == "" || !strings.HasSuffix(key, ".dsh") {
+
+	// Validate key
+	v := NewValidator()
+	v.RequireNonEmpty("key", key)
+	v.RequireNoPathTraversal("key", key)
+	if !strings.HasSuffix(key, ".dsh") {
 		writeError(w, "Key must end with .dsh", http.StatusBadRequest)
+		return
+	}
+	if !v.IsValid() {
+		writeError(w, v.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -189,11 +217,17 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, map[string]any{
-		"success":    true,
-		"key":        key,
-		"slideCount": result.SlideCount,
-		"manifest":   manifestKey,
+	// Build slide URL list
+	slides := make([]string, result.SlideCount)
+	for i := 0; i < result.SlideCount; i++ {
+		slides[i] = fmt.Sprintf("%s/slide-%04d.svg", baseName, i+1)
+	}
+
+	writeJSON(w, UploadResponse{
+		Success:    true,
+		Key:        key,
+		SlideCount: result.SlideCount,
+		Slides:     slides,
 	})
 }
 
@@ -238,27 +272,30 @@ func handleGetManifest(w http.ResponseWriter, r *http.Request) {
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, "/status/")
-	if key == "" {
-		writeError(w, "Missing key", http.StatusBadRequest)
+
+	// Validate key
+	v := NewValidator()
+	v.RequireNonEmpty("key", key)
+	v.RequireNoPathTraversal("key", key)
+	if !v.IsValid() {
+		writeError(w, v.Error(), http.StatusBadRequest)
 		return
 	}
 
 	data, err := runtime.KV().Get(r.Context(), "status:"+key)
 	if err != nil || data == nil {
-		writeJSON(w, map[string]any{
-			"key":    key,
-			"status": "unknown",
+		writeJSON(w, StatusResponse{
+			Status: "unknown",
 		})
 		return
 	}
 
-	var status map[string]any
+	var status StatusResponse
 	if err := json.Unmarshal(data, &status); err != nil {
 		writeError(w, "Invalid status data", http.StatusInternalServerError)
 		return
 	}
 
-	status["key"] = key
 	writeJSON(w, status)
 }
 
@@ -269,13 +306,18 @@ func handleListDecks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decks := make([]string, 0)
+	decks := make([]DeckInfo, 0)
 	for _, prefix := range result.DelimitedPrefixes {
-		decks = append(decks, strings.TrimSuffix(prefix, "/"))
+		key := strings.TrimSuffix(prefix, "/")
+		decks = append(decks, DeckInfo{
+			Key: key,
+			// TODO: Optionally read manifest.json to populate SlideCount and ProcessedAt
+		})
 	}
 
-	writeJSON(w, map[string]any{
-		"decks": decks,
+	writeJSON(w, DecksResponse{
+		Decks: decks,
+		Count: len(decks),
 	})
 }
 
@@ -287,8 +329,9 @@ func writeJSON(w http.ResponseWriter, data any) {
 func writeError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{
-		"error": message,
+	json.NewEncoder(w).Encode(ErrorResponse{
+		Error:   message,
+		Success: false,
 	})
 }
 
@@ -322,12 +365,6 @@ func expandImports(ctx context.Context, source []byte, sourcePath string) ([]byt
 
 // handleListExamples lists all example deck files from storage
 func handleListExamples(w http.ResponseWriter, r *http.Request) {
-	type Example struct {
-		Name       string `json:"name"`
-		Path       string `json:"path"`
-		Renderable bool   `json:"renderable"`
-	}
-
 	// Check if we should filter to only renderable decks
 	filterRenderable := r.URL.Query().Get("renderable") == "true"
 
@@ -374,9 +411,9 @@ func handleListExamples(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, map[string]any{
-		"examples": examples,
-		"count":    len(examples),
+	writeJSON(w, ExamplesResponse{
+		Examples: examples,
+		Count:    len(examples),
 	})
 }
 
@@ -384,9 +421,12 @@ func handleListExamples(w http.ResponseWriter, r *http.Request) {
 func handleGetExample(w http.ResponseWriter, r *http.Request) {
 	examplePath := strings.TrimPrefix(r.URL.Path, "/examples/")
 
-	// Security: prevent path traversal
-	if strings.Contains(examplePath, "..") {
-		writeError(w, "Invalid path", http.StatusBadRequest)
+	// Validate path
+	v := NewValidator()
+	v.RequireNonEmpty("path", examplePath)
+	v.RequireNoPathTraversal("path", examplePath)
+	if !v.IsValid() {
+		writeError(w, v.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -450,6 +490,16 @@ func handleDeckRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDeckSlide(w http.ResponseWriter, r *http.Request, examplePath string, slideParam string) {
+	// Validate inputs
+	v := NewValidator()
+	v.RequireNonEmpty("examplePath", examplePath)
+	v.RequireNoPathTraversal("examplePath", examplePath)
+	v.RequireNonEmpty("slideParam", slideParam)
+	if !v.IsValid() {
+		writeError(w, v.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Parse slide number from "1.svg" -> 1
 	slideNumStr := strings.TrimSuffix(slideParam, ".svg")
 	slideNum, err := strconv.Atoi(slideNumStr)
@@ -503,9 +553,18 @@ func handleDeckSlide(w http.ResponseWriter, r *http.Request, examplePath string,
 }
 
 func handleDeckAsset(w http.ResponseWriter, r *http.Request, examplePath string, filename string) {
-	// Security: prevent path traversal
-	if strings.Contains(filename, "..") || strings.Contains(filename, "/") {
-		writeError(w, "Invalid asset path", http.StatusBadRequest)
+	// Validate inputs
+	v := NewValidator()
+	v.RequireNonEmpty("examplePath", examplePath)
+	v.RequireNoPathTraversal("examplePath", examplePath)
+	v.RequireNonEmpty("filename", filename)
+	v.RequireNoPathTraversal("filename", filename)
+	if strings.Contains(filename, "/") {
+		writeError(w, "Filename cannot contain path separators", http.StatusBadRequest)
+		return
+	}
+	if !v.IsValid() {
+		writeError(w, v.Error(), http.StatusBadRequest)
 		return
 	}
 

@@ -1,0 +1,82 @@
+version: '3'
+
+tasks:
+  handler:
+    desc: Lint handler package for cross-platform compatibility
+    cmds:
+      - echo "Checking handler package for platform-specific imports..."
+      - |
+        # Check that handler doesn't import platform-specific packages
+        FORBIDDEN="github.com/syumai/workers"
+        if grep -r "import.*$FORBIDDEN" handler/; then
+          echo "❌ Error: handler package must not import platform-specific packages like $FORBIDDEN"
+          exit 1
+        fi
+        echo "✓ Handler package has no platform-specific imports"
+      - |
+        # Check that handler only has cloudflare build tag
+        for file in handler/*.go; do
+          if ! head -n 1 "$file" | grep -q "//go:build js || tinygo || cloudflare"; then
+            echo "❌ Error: $file missing required build tag"
+            exit 1
+          fi
+        done
+        echo "✓ All handler files have correct build tags"
+
+  taskfile:
+    desc: Lint Taskfile for consistent variable naming
+    cmds:
+      - echo "Checking Taskfile variable consistency..."
+      - |
+        # Check for undefined variables (common typos)
+        UNDEFINED=$(grep -r '\{\{\.SRC_DIR\}\}' taskfiles/ || true)
+        if [ -n "$UNDEFINED" ]; then
+          echo "❌ Error: Found undefined SRC_DIR variable (should be SOURCE_DIR):"
+          echo "$UNDEFINED"
+          exit 1
+        fi
+        echo "✓ No undefined variables found"
+      - |
+        # Check SOURCE_DIR is used consistently
+        if ! grep -q "SOURCE_DIR:" Taskfile.yaml; then
+          echo "❌ Error: SOURCE_DIR not defined in Taskfile.yaml"
+          exit 1
+        fi
+        echo "✓ SOURCE_DIR defined in Taskfile.yaml"
+
+  build-tags:
+    desc: Verify build tags are correct across all packages
+    cmds:
+      - echo "Verifying build tags..."
+      - |
+        # Handler must have js || tinygo || cloudflare
+        for file in handler/*.go; do
+          if ! head -n 1 "$file" | grep -qE "//go:build (js|tinygo|cloudflare)"; then
+            echo "❌ Error: $file has incorrect build tag"
+            exit 1
+          fi
+        done
+        echo "✓ Handler build tags correct"
+      - |
+        # Runtime platform files must have correct tags
+        if [ -f runtime/pipeline_wasm.go ]; then
+          if ! head -n 1 runtime/pipeline_wasm.go | grep -q "//go:build js || tinygo || cloudflare"; then
+            echo "❌ Error: pipeline_wasm.go has incorrect build tag"
+            exit 1
+          fi
+        fi
+        if [ -f runtime/pipeline_native.go ]; then
+          if ! head -n 1 runtime/pipeline_native.go | grep -q "//go:build !js && !tinygo && !cloudflare"; then
+            echo "❌ Error: pipeline_native.go has incorrect build tag"
+            exit 1
+          fi
+        fi
+        echo "✓ Runtime build tags correct"
+
+  all:
+    desc: Run all lint checks
+    cmds:
+      - task: handler
+      - task: taskfile
+      - task: build-tags
+      - echo "✅ All lint checks passed"

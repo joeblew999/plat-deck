@@ -37,6 +37,7 @@ includes:
   cf: ./taskfiles/cf.yaml
   src: ./taskfiles/src.yaml
   util: ./taskfiles/util.yaml
+  lint: ./taskfiles/lint.yaml
 
 tasks:
   default:
