@@ -29,6 +29,8 @@ func RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/decks", cors(handleListDecks))
 	mux.HandleFunc("/upload/", cors(handleUpload))
 	mux.HandleFunc("/status/", cors(handleStatus))
+	mux.HandleFunc("/examples", cors(handleListExamples))
+	mux.HandleFunc("/examples/", cors(handleGetExample))
 }
 
 // cors wraps a handler with CORS headers
@@ -64,7 +66,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"service":   "deckfs",
 		"version":   Version,
-		"endpoints": []string{"/health", "/process", "/slides/:key", "/manifest/:name", "/decks", "/upload/:key", "/status/:key"},
+		"endpoints": []string{"/health", "/process", "/slides/:key", "/manifest/:name", "/decks", "/upload/:key", "/status/:key", "/examples", "/examples/:path"},
 	})
 }
 
@@ -326,4 +328,91 @@ func expandImports(ctx context.Context, source []byte, sourcePath string) ([]byt
 
 	// Expand imports
 	return resolver.Expand(ctx, source, sourcePath)
+}
+
+// handleListExamples lists all example deck files from storage
+func handleListExamples(w http.ResponseWriter, r *http.Request) {
+	type Example struct {
+		Name       string `json:"name"`
+		Path       string `json:"path"`
+		Renderable bool   `json:"renderable"`
+	}
+
+	// Check if we should filter to only renderable decks
+	filterRenderable := r.URL.Query().Get("renderable") == "true"
+
+	// List all .dsh files from INPUT storage
+	listResult, err := runtime.Input().List(r.Context(), "", "")
+	if err != nil {
+		writeError(w, fmt.Sprintf("Failed to list examples: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var examples []Example
+
+	for _, key := range listResult.Keys {
+		if !strings.HasSuffix(key, ".dsh") {
+			continue
+		}
+
+		// Check if file is renderable
+		isRenderable := false
+		if reader, err := runtime.Input().Get(r.Context(), key); err == nil {
+			content, _ := io.ReadAll(reader)
+			reader.Close()
+			
+			// Check if file contains deck/edeck structure
+			contentStr := string(content)
+			isRenderable = strings.HasPrefix(contentStr, "deck\n") ||
+				strings.HasPrefix(contentStr, "deck ") ||
+				strings.Contains(contentStr, "\ndeck\n") ||
+				strings.Contains(contentStr, "\ndeck ")
+		}
+
+		// Skip non-renderable files if filter is enabled
+		if filterRenderable && !isRenderable {
+			continue
+		}
+
+		// Extract name from path
+		name := strings.TrimSuffix(key, ".dsh")
+
+		examples = append(examples, Example{
+			Name:       name,
+			Path:       key,
+			Renderable: isRenderable,
+		})
+	}
+
+	writeJSON(w, map[string]any{
+		"examples": examples,
+		"count":    len(examples),
+	})
+}
+
+// handleGetExample returns the content of a specific example file
+func handleGetExample(w http.ResponseWriter, r *http.Request) {
+	examplePath := strings.TrimPrefix(r.URL.Path, "/examples/")
+
+	// Security: prevent path traversal
+	if strings.Contains(examplePath, "..") {
+		writeError(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	reader, err := runtime.Input().Get(r.Context(), examplePath)
+	if err != nil {
+		writeError(w, "Example not found", http.StatusNotFound)
+		return
+	}
+	defer reader.Close()
+
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		writeError(w, "Failed to read example", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(content)
 }
