@@ -1,8 +1,8 @@
-# ADR 0002: Font Discovery from Decksh and Deck XML
+# ADR 0002: Font Discovery and SVG Font Delivery
 
 ## Status
 
-Draft - Needs Research
+**Accepted** - Strategy decided based on research
 
 ## Date
 
@@ -10,13 +10,20 @@ Draft - Needs Research
 
 ## Context
 
+### Problem Statement
+
+To render decks correctly, we need to understand:
+1. What fonts does a deck use?
+2. How do we ensure those fonts are available when SVG is viewed?
+3. How does this work in both Cloudflare Workers and native server?
+
 ### Current Facts
 
 **SVG rendering:**
 - SVG output contains font references: `<text font-family="Roboto">`
 - Does NOT embed font files
 - Browser/viewer uses its own fonts to render
-- **Font files NOT needed for SVG** ✅
+- **Fonts must be available to browser** ⚠️
 
 **PNG/PDF rendering:**
 - Requires actual TTF font files
@@ -24,162 +31,257 @@ Draft - Needs Research
 - **Font files REQUIRED for PNG/PDF** ⚠️
 
 **Decksh in Cloudflare:**
-- DOES work - `github.com/ajstarks/decksh` package compiled to WASM
+- DOES work - `github.com/ajstarks/decksh` package compiled to WASM ✅
 - Can parse decksh source → deck XML
 - **CAN detect fonts from XML in Cloudflare** ✅
 
-### Why We Need Font Discovery
+### Research: What ajstarks' svgdeck Actually Does
 
-1. **PNG/PDF Pre-caching** - Fetch font files before rendering
-2. **Web GUI Display** - Show users what fonts their deck uses
-3. **Validation** - Check if required fonts are available
-4. **Size Estimates** - Tell users download size before rendering
+**Tested svgdeck behavior** (.src/deck/cmd/svgdeck/svgdeck.go):
+
+1. **Font output** (line 437):
+   ```go
+   doc.Text(x, y, s, `xml:space="preserve"`, 
+       fmt.Sprintf("font-family:%s", fontlookup(font)))
+   ```
+   - Just writes `font-family:FontName` into SVG
+   - No font embedding (would be 150KB+ per font)
+   - No Google Fonts `@import` injection
+   - No font file references
+
+2. **Font mapping** (lines 34-36, 159-165, 757-759):
+   ```go
+   var fontmap = map[string]string{}
+   
+   func fontlookup(s string) string {
+       font, ok := fontmap[s]
+       if ok {
+           return font
+       }
+       return "sans"  // Fallback to sans
+   }
+   
+   // In main():
+   fontmap["sans"] = *sansfont    // Default: "Helvetica"
+   fontmap["serif"] = *serifont   // Default: "Times-Roman"
+   fontmap["mono"] = *monofont    // Default: "Courier"
+   ```
+   - Unmapped fonts fall back to "Helvetica"
+   - Can override via `-sans Roboto` flag
+
+3. **Actual test results:**
+   ```bash
+   $ echo 'deck
+       slide
+         text "Test" 50 50 5 "Roboto"
+       eslide
+     edeck' | decksh | svgdeck
+   ```
+   Output:
+   ```xml
+   <text style="font-family:sans">Test</text>
+   ```
+   "Roboto" → falls back to "sans" → "Helvetica"
+
+**What plat-deck currently does:**
+
+1. **WASM pipeline** (pkg/pipeline/wasm.go:44-51):
+   ```go
+   sansFont:  "Helvetica, Arial, sans-serif"
+   serifFont: "Georgia, Times, serif"
+   monoFont:  "Monaco, Consolas, monospace"
+   ```
+   ✅ Uses CSS font fallback lists (smart!)
+   ✅ If Helvetica unavailable, tries Arial, then system sans-serif
+
+2. **Native pipeline** (pkg/pipeline/native.go:23):
+   ```go
+   svgdeckBin string  // Calls svgdeck binary
+   ```
+   ⚠️ Uses svgdeck defaults: "Helvetica", "Times-Roman", "Courier"
+   ⚠️ No fallback lists
+
+### The Real SVG Font Problem
+
+**When browser renders SVG with `<text font-family="Roboto">`:**
+
+1. **User's local fonts** (current behavior)
+   - Different systems have different fonts
+   - Roboto may not be installed
+   - Falls back to default sans-serif
+   - ❌ Looks different on different systems
+   - ❌ May not render as intended
+
+2. **Google Fonts CDN injection** (we could do this)
+   - Inject `<style>@import url('fonts.googleapis.com/css2?family=Roboto');</style>` into SVG
+   - Browser fetches font when viewing SVG
+   - ✅ Consistent rendering across systems
+   - ✅ Small SVG file size
+   - ❌ Requires internet connection
+   - ❌ Google Fonts CDN dependency
+   - ⚠️ Need to detect fonts to inject
+
+3. **Embedded font data** (possible but large)
+   - Base64 encode TTF into SVG `<defs>`
+   - Works offline
+   - ✅ Self-contained SVG
+   - ✅ Consistent rendering
+   - ❌ Each SVG becomes ~150KB+ larger per font
+   - ❌ Multi-slide deck duplicates fonts per slide
+   - ⚠️ Need font files available
 
 ## Decision
 
-NOT READY - need to research detection approaches
+**Use CSS font fallback lists for SVG**
 
-## Detection Strategy
+Reasons:
+1. **WASM pipeline already does this correctly**
+2. **Simple and works without font fetching**
+3. **Reasonable cross-platform rendering**
+4. **No external dependencies (CDN)**
+5. **Small SVG file size**
+6. **Works offline**
 
-Since decksh works in Cloudflare (compiled to WASM), we have options:
+### Strategy
 
-### Option A: Always Use Deck XML
+**For SVG (both WASM and Native):**
+- Map generic names to fallback lists:
+  - `sans` → "Helvetica, Arial, sans-serif"
+  - `serif` → "Georgia, Times, serif"
+  - `mono` → "Monaco, Consolas, monospace"
+- Custom fonts (e.g., "Roboto") → map to similar generic + fallback:
+  - "Roboto" → "Roboto, Helvetica, Arial, sans-serif"
+- Browser tries fonts in order until one is found
 
-**Flow:**
-1. Convert decksh → XML (works everywhere)
-2. Parse XML using deck package
-3. Extract fonts from Text/List elements
+**For PNG/PDF (Native only):**
+- Requires actual font files (TTF)
+- See ADR 0004: Font Fetching for font management strategy
+
+### Font Discovery
+
+**Two approaches for detecting fonts:**
+
+#### Option A: XML-Only (Recommended for MVP)
+
+```
+decksh source → deck XML → Parse XML → Extract fonts from Text/List elements
+```
 
 **Pros:**
 - 100% accurate
 - Single code path
-- Uses canonical format
+- Uses canonical deck format
+- Works in Cloudflare (decksh package compiles to WASM)
 
 **Cons:**
-- Must run decksh first
-- Slightly slower
+- Must run decksh conversion first
+- Slightly slower than regex
 
-### Option B: Regex for Quick Preview, XML for Accuracy
+**Use for:** 
+- Backend validation before PNG/PDF rendering
+- API endpoint `/detect-fonts`
 
-**Flow:**
-1. Regex decksh source for instant preview (Web GUI as user types)
-2. XML detection for validation before rendering
+#### Option B: Regex for Quick Preview (Optional enhancement)
 
-**Pros:**
-- Fast preview
-- Accurate validation
-
-**Cons:**
-- Two code paths
-- Regex may disagree with XML
-
-### Option C: Regex Only (Fast but Risky)
+```
+Scan decksh source with regex for `"fontname"` patterns
+```
 
 **Pros:**
-- Fastest
-- Works without conversion
+- Instant results (no decksh conversion)
+- Good for real-time Web GUI as user types
 
 **Cons:**
 - Inaccurate (misses variables, loops, conditionals)
 - May over/under detect fonts
+- Regex may disagree with XML
 
-## Research Tasks
+**Use for:**
+- Optional: Web GUI instant preview (debounced)
+- Show approximate font list while typing
+- Re-validate with XML before rendering
 
-1. Measure decksh→XML conversion time (is it fast enough for real-time?)
-2. If fast enough: Option A (XML only)
-3. If too slow: Build regex detector, measure accuracy
-4. Test on 20 random deckviz files
-5. Decide which option
+### Implementation Plan
+
+**Phase 1: MVP (XML-only detection)**
+1. Create font detector using `github.com/ajstarks/deck` package
+2. Parse deck XML, extract unique fonts from:
+   - `<text font="...">`
+   - `<list font="...">`
+   - List items with custom fonts
+3. Map fonts to fallback lists
+4. Return font names + fallback CSS
+
+**Phase 2: Optional (Regex quick preview)**
+1. Build regex patterns for decksh source
+2. Test accuracy on 20 deckviz files
+3. If >90% accurate, add to Web GUI
+4. Always re-validate with XML before rendering
 
 ## Success Criteria
 
-- Can detect fonts needed for PNG/PDF rendering
-- Fast enough for Web GUI (<500ms)
-- Works in Cloudflare Workers
-- Clear error when fonts unavailable
+- ✅ Can detect fonts from deck XML
+- ✅ SVG renders consistently with fallback fonts
+- ✅ Works in Cloudflare Workers
+- ✅ No external dependencies for SVG
+- ✅ Fast enough for Web GUI (<500ms)
 
-## Key Insight
+## Implementation Notes
 
-**Font files only needed for PNG/PDF, not SVG!**
+### Font Mapping (for SVG)
 
-This simplifies the problem:
-- SVG: No font fetching needed (just names in XML)
-- PNG/PDF: Font fetching required
-- Focus font management on PNG/PDF only
+```go
+var fontFallbacks = map[string]string{
+    "sans":       "Helvetica, Arial, sans-serif",
+    "serif":      "Georgia, Times, serif",
+    "mono":       "Monaco, Consolas, monospace",
+    "helvetica":  "Helvetica, Arial, sans-serif",
+    "roboto":     "Roboto, Helvetica, Arial, sans-serif",
+    "opensans":   "Open Sans, Helvetica, Arial, sans-serif",
+    // Add more as needed
+}
+```
+
+### XML Font Detection
+
+```go
+func DetectFonts(deckXML []byte) ([]string, error) {
+    var d deck.Deck
+    if err := xml.Unmarshal(deckXML, &d); err != nil {
+        return nil, err
+    }
+    
+    fonts := make(map[string]bool)
+    for _, slide := range d.Slide {
+        for _, text := range slide.Text {
+            if text.Font != "" {
+                fonts[strings.ToLower(text.Font)] = true
+            }
+        }
+        for _, list := range slide.List {
+            if list.Font != "" {
+                fonts[strings.ToLower(list.Font)] = true
+            }
+        }
+    }
+    
+    result := make([]string, 0, len(fonts))
+    for font := range fonts {
+        result = append(result, font)
+    }
+    return result, nil
+}
+```
 
 ## References
 
 - [ajstarks/deck package](https://github.com/ajstarks/deck)
-- [decksh package](https://github.com/ajstarks/decksh)
+- [svgdeck source](https://github.com/ajstarks/deck/blob/main/cmd/svgdeck/svgdeck.go)
+- [CSS font-family fallbacks](https://developer.mozilla.org/en-US/docs/Web/CSS/font-family)
 - Current WASM pipeline: pkg/pipeline/wasm.go
+- Current native pipeline: pkg/pipeline/native.go
 
-## CRITICAL QUESTION: SVG Font Delivery
+## Related ADRs
 
-### Current Assumption (Needs Validation)
-
-I assumed SVG "just works" because it references font names. **This is wrong!**
-
-When we generate:
-```xml
-<text font-family="Roboto">Hello</text>
-```
-
-**The font must come from somewhere:**
-
-1. **User's local fonts** (unreliable)
-   - Different systems have different fonts
-   - Roboto may not be installed
-   - Falls back to default (looks wrong)
-
-2. **Google Fonts CDN** (need to inject reference)
-   - Add `@import url('fonts.googleapis.com/...')` to SVG
-   - Browser fetches font when viewing
-   - Requires internet
-   - Consistent rendering ✅
-
-3. **Embedded font data** (self-contained but large)
-   - Base64 encode font into SVG
-   - Works offline
-   - Each SVG becomes ~150KB+ larger per font
-   - Self-contained ✅
-
-### What Does ajstarks' svgdeck Do?
-
-**NEED TO RESEARCH:**
-- Check svgdeck source code
-- Generate SVG with font, inspect output
-- Does it inject Google Fonts references?
-- Does it embed fonts?
-- Or does it assume local fonts?
-
-### Testing Needed
-
-1. Generate SVG with "Roboto" font
-2. View on system without Roboto installed
-3. What happens? (probably falls back)
-4. Check if ajstarks' svgdeck has font embedding option
-5. Decide our strategy
-
-### Implications
-
-**If we inject Google Fonts CDN references:**
-- Pro: Consistent rendering
-- Pro: Small SVG size
-- Con: Requires internet
-- Con: Depends on Google CDN
-- Need: Modify svgdeck output or post-process
-
-**If we embed fonts:**
-- Pro: Self-contained
-- Pro: Works offline
-- Con: Large files (150KB+ per font per SVG)
-- Con: Multiple slides = font duplicated per slide
-- Need: Fetch font, base64 encode, inject
-
-**If we do nothing (current):**
-- Pro: Small SVG size
-- Pro: Simple
-- Con: Looks different on different systems
-- Con: May not render correctly
-
-This is a major architecture decision we missed!
+- ADR 0003: Font Display (Web GUI UX)
+- ADR 0004: Font Fetching (PNG/PDF font management)
