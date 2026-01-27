@@ -364,6 +364,9 @@ func expandImports(ctx context.Context, source []byte, sourcePath string) ([]byt
 
 // handleListExamples lists all example deck files from storage
 func handleListExamples(w http.ResponseWriter, r *http.Request) {
+	// Check if we should filter to only renderable decks
+	filterRenderable := r.URL.Query().Get("renderable") == "true"
+
 	// List all .dsh files from INPUT storage
 	listResult, err := runtime.Input().List(r.Context(), "", "")
 	if err != nil {
@@ -381,12 +384,37 @@ func handleListExamples(w http.ResponseWriter, r *http.Request) {
 		// Extract name from path
 		name := strings.TrimSuffix(key, ".dsh")
 
-		// Assume all .dsh files are renderable
-		// Actual renderability will be determined when file is accessed
+		// Check if file is renderable when filtering is requested
+		isRenderable := true
+		if filterRenderable {
+			// Read file to check if it's renderable
+			reader, err := runtime.Input().Get(r.Context(), key)
+			if err != nil {
+				continue // Skip files we can't read
+			}
+			content, err := io.ReadAll(reader)
+			reader.Close()
+			if err != nil {
+				continue // Skip files we can't read
+			}
+
+			// Check if file contains deck/edeck structure
+			contentStr := string(content)
+			isRenderable = strings.HasPrefix(contentStr, "deck\n") ||
+				strings.HasPrefix(contentStr, "deck ") ||
+				strings.Contains(contentStr, "\ndeck\n") ||
+				strings.Contains(contentStr, "\ndeck ")
+
+			// Skip non-renderable files if filter is enabled
+			if !isRenderable {
+				continue
+			}
+		}
+
 		examples = append(examples, Example{
 			Name:       name,
 			Path:       key,
-			Renderable: true, // Optimistic assumption
+			Renderable: isRenderable,
 		})
 	}
 
