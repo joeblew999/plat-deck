@@ -96,9 +96,11 @@ See [docs/adr/](docs/adr/) for Architecture Decision Records.
 ### Auto-Rebuild System
 
 **Local development has automatic rebuilds** (see ADR-002):
-- File watcher automatically rebuilds when you save changes
-- Watches: `demo/`, `handler/`, `runtime/`, `cmd/wazero/`
-- Rebuilds in ~2 seconds after file save
+- File watchers automatically rebuild when you save changes
+- Two watchers available:
+  - `watcher-wazero` (enabled by default) - Local Go server
+  - `watcher-cloudflare` (disabled by default) - Local Cloudflare emulator
+- Rebuilds in ~2-3 seconds after file save
 - No manual commands needed!
 
 **Requires**: `watchexec` installed (checked by `task util:deps`)
@@ -113,23 +115,44 @@ apt install watchexec  # or: pacman -S watchexec
 scoop install watchexec
 ```
 
-**How it works**:
-1. You edit a file (e.g., `demo/index.html`)
-2. Save the file
-3. Watcher detects change (~50ms)
-4. Automatically runs: `task build:host && task pc:restart PROC=wazero`
-5. Browser refresh shows changes (~2s total)
+**Default Setup (Wazero):**
+```bash
+task pc:up  # Starts wazero + demo + watcher-wazero
+# Edit files → Save → Auto-rebuilds wazero → Refresh browser
+```
 
-**Disable watcher** (if needed):
+**Cloudflare Development (Optional):**
+To develop against local Cloudflare emulator with auto-rebuild:
+
+1. Enable wrangler and its watcher in `process-compose.yaml`:
+   ```yaml
+   wrangler:
+     disabled: false  # Change from true
+
+   watcher-cloudflare:
+     disabled: false  # Change from true
+   ```
+
+2. Start process-compose:
+   ```bash
+   task pc:up  # Now includes wrangler + watcher-cloudflare
+   # Edit files → Save → Auto-rebuilds CF worker → Refresh browser at :8787
+   ```
+
+**Disable watchers** (if needed):
 ```yaml
 # process-compose.yaml
 watcher-wazero:
-  disabled: true  # Add this line
+  disabled: true  # Disable wazero auto-rebuild
+
+watcher-cloudflare:
+  disabled: true  # Disable CF auto-rebuild
 ```
 
-**Cloudflare deployment** (still manual):
+**Production Deployment** (manual for safety):
 ```bash
-# After local testing, deploy to production
+# Test locally first with auto-rebuild
+# Then manually deploy to production
 task cf:deploy
 ```
 

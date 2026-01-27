@@ -41,3 +41,26 @@ processes:
     availability:
       restart: on_failure
       backoff_seconds: 5
+
+  watcher-cloudflare:
+    command: |
+      watchexec \
+        --watch demo \
+        --watch handler \
+        --watch runtime \
+        --watch cmd/cloudflare \
+        --exts go,html \
+        --ignore '*.swp' \
+        --ignore '*.swo' \
+        --ignore '.git' \
+        --debounce 500ms \
+        --clear \
+        --on-busy-update restart \
+        -- sh -c 'echo "🔄 Rebuilding Cloudflare worker..." && task build:cloudflare && echo "✅ Rebuild complete, restarting wrangler..." && lsof -ti :8787 | xargs kill -9 2>/dev/null || true'
+    depends_on:
+      wrangler:
+        condition: process_started
+    disabled: true
+    availability:
+      restart: on_failure
+      backoff_seconds: 5

@@ -118,23 +118,52 @@ task run:wazero    # API only on :8080
 task run:demo      # Demo UI only on :3000
 ```
 
-### 3. Deploy to Production (When Ready)
+### 3. Cloudflare Development (Optional)
 
-Development has auto-rebuild, but deployment is **manual** (for safety):
+**Option A: Local Wazero (Default - Recommended)**
+```bash
+task pc:up  # What you've been using
+# Uses native Go server with full features (SVG/PNG/PDF)
+```
+
+**Option B: Local Cloudflare Emulator with Auto-Rebuild**
+
+Want to test Cloudflare Worker locally with auto-rebuild?
+
+1. Enable in `process-compose.yaml`:
+   ```yaml
+   wrangler:
+     disabled: false  # Change from true
+
+   watcher-cloudflare:
+     disabled: false  # Change from true
+   ```
+
+2. Start everything:
+   ```bash
+   task pc:up
+   # Now runs: wazero (:8080) + wrangler (:8787) + both watchers
+   # Edit files → Auto-rebuilds BOTH wazero and Cloudflare!
+   ```
+
+3. Test Cloudflare worker at http://localhost:8787
+
+**Option C: Manual Cloudflare Testing**
+```bash
+task run:wrangler  # Just wrangler, no auto-rebuild
+```
+
+### 4. Deploy to Production (When Ready)
+
+Production deployment is **manual** (for safety):
 
 ```bash
-# Test locally first with task pc:up
+# Test locally first (wazero or wrangler)
 # Then deploy to Cloudflare Workers
 task cf:deploy
 ```
 
 Your changes are now live at https://deckfs.YOUR-SUBDOMAIN.workers.dev/
-
-**Testing Cloudflare Locally** (optional):
-```bash
-task run:wrangler
-# Starts local Cloudflare emulator on :8787
-```
 
 ## Output Formats
 
