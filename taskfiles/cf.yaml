@@ -7,6 +7,7 @@ tasks:
       - bunx wrangler r2 bucket create {{.CF_R2_INPUT}} 2>/dev/null || echo "{{.CF_R2_INPUT}} exists"
       - bunx wrangler r2 bucket create {{.CF_R2_OUTPUT}} 2>/dev/null || echo "{{.CF_R2_OUTPUT}} exists"
       - bunx wrangler r2 bucket create {{.CF_R2_WASM}} 2>/dev/null || echo "{{.CF_R2_WASM}} exists"
+      - bunx wrangler r2 bucket create {{.CF_R2_FONTS}} 2>/dev/null || echo "{{.CF_R2_FONTS}} exists"
       - bunx wrangler queues create {{.CF_QUEUE}} 2>/dev/null || echo "{{.CF_QUEUE}} exists"
       - bunx wrangler kv namespace create {{.CF_KV_NAMESPACE}} 2>/dev/null || echo "{{.CF_KV_NAMESPACE}} exists"
       - echo "Run 'task cf:list' to get KV namespace ID"
@@ -37,6 +38,7 @@ tasks:
       - bunx wrangler r2 bucket delete {{.CF_R2_INPUT}} 2>/dev/null || true
       - bunx wrangler r2 bucket delete {{.CF_R2_OUTPUT}} 2>/dev/null || true
       - bunx wrangler r2 bucket delete {{.CF_R2_WASM}} 2>/dev/null || true
+      - bunx wrangler r2 bucket delete {{.CF_R2_FONTS}} 2>/dev/null || true
       - bunx wrangler queues delete {{.CF_QUEUE}} 2>/dev/null || true
       - echo "✓ Teardown complete"
 
@@ -50,3 +52,63 @@ tasks:
     desc: List R2 buckets
     cmds:
       - bunx wrangler r2 bucket list
+
+  # Sync operations
+  sync-examples:
+    desc: Sync all examples from .src/deckviz to R2 INPUT bucket
+    cmds:
+      - |
+        echo "Syncing examples to R2..."
+        find {{.SOURCE_DIR}}/deckviz -type f \( -name "*.dsh" -o -name "*.xml" -o -name "*.png" -o -name "*.jpg" -o -name "*.d" \) | while read file; do
+          # Get relative path from deckviz dir
+          relpath="${file#{{.SOURCE_DIR}}/deckviz/}"
+          echo "Uploading: $relpath"
+          bunx wrangler r2 object put {{.CF_R2_INPUT}}/"$relpath" --file="$file" --remote 2>/dev/null || echo "  ⚠️  Failed: $relpath"
+        done
+        echo "✓ Sync complete"
+    preconditions:
+      - test -d {{.SOURCE_DIR}}/deckviz
+
+  sync-folder:
+    desc: Sync local folder to R2 bucket (task cf:sync-folder FOLDER=path/to/folder BUCKET=bucket-name [PREFIX=prefix])
+    vars:
+      PREFIX: '{{.PREFIX | default ""}}'
+    cmds:
+      - |
+        if [ -z "{{.FOLDER}}" ] || [ -z "{{.BUCKET}}" ]; then
+          echo "Usage: task cf:sync-folder FOLDER=path/to/folder BUCKET=bucket-name [PREFIX=prefix]"
+          exit 1
+        fi
+        echo "Syncing {{.FOLDER}} → {{.BUCKET}}/{{.PREFIX}}"
+        find "{{.FOLDER}}" -type f | while read file; do
+          # Get relative path from source folder
+          relpath="${file#{{.FOLDER}}/}"
+          if [ -n "{{.PREFIX}}" ]; then
+            key="{{.PREFIX}}/$relpath"
+          else
+            key="$relpath"
+          fi
+          echo "  $relpath → $key"
+          bunx wrangler r2 object put {{.BUCKET}}/"$key" --file="$file" --remote 2>/dev/null || echo "  ⚠️  Failed: $key"
+        done
+        echo "✓ Sync complete"
+    preconditions:
+      - test -d "{{.FOLDER}}"
+
+  sync-fonts:
+    desc: Sync local .fonts directory to R2 FONTS bucket
+    cmds:
+      - task: sync-folder
+        vars:
+          FOLDER: .fonts
+          BUCKET: deckfs-fonts
+          PREFIX: fonts
+    preconditions:
+      - test -d .fonts
+
+  r2-ls:
+    desc: List files in R2 bucket (task cf:r2-ls BUCKET=deckfs-input [PREFIX=path/])
+    vars:
+      PREFIX: '{{.PREFIX | default ""}}'
+    cmds:
+      - bunx wrangler r2 object list {{.BUCKET}} --prefix="{{.PREFIX}}"

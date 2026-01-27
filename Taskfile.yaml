@@ -21,6 +21,7 @@ vars:
   CF_R2_INPUT: deckfs-input
   CF_R2_OUTPUT: deckfs-output
   CF_R2_WASM: deckfs-wasm
+  CF_R2_FONTS: deckfs-fonts
   CF_QUEUE: deckfs-events
   CF_KV_NAMESPACE: DECKFS_STATUS
 
