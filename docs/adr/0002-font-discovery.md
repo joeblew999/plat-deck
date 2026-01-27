@@ -285,3 +285,32 @@ func DetectFonts(deckXML []byte) ([]string, error) {
 
 - ADR 0003: Font Display (Web GUI UX)
 - ADR 0004: Font Fetching (PNG/PDF font management)
+
+## Platform Integration
+
+### Existing Storage Abstraction
+
+**Good news:** plat-deck already has storage abstraction in `runtime/` package!
+
+```go
+// runtime/runtime.go
+type Storage interface {
+    Get(ctx context.Context, key string) (io.ReadCloser, error)
+    Put(ctx context.Context, key string, data []byte, contentType string) error
+    List(ctx context.Context, prefix string, delimiter string) (*ListResult, error)
+    Delete(ctx context.Context, key string) error
+}
+```
+
+**Existing implementations:**
+- `R2Storage` - Cloudflare Workers R2 buckets (runtime/storage_cloudflare.go)
+- `R2HTTPStorage` - Native Go → R2 via S3 API (runtime/storage_http.go)
+- `LocalStorage` - Local filesystem (to be added in runtime/storage_local.go)
+
+**Current R2 buckets:**
+- `DECKFS_INPUT` - Source .dsh files
+- `DECKFS_OUTPUT` - Rendered slides
+- `DECKFS_WASM` - WASM modules
+- `DECKFS_FONTS` - Font cache (to be added)
+
+**For font management:** This abstraction enables unified font caching across Cloudflare Workers (R2) and native server (local FS or R2). See ADR 0004 for implementation.
